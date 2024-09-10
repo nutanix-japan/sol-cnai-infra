@@ -18,6 +18,9 @@ bin/**
 
 # ignore nkp scripts temporarily
 scripts/nkp/**
+!scripts/nkp/gridd.conf
+!scripts/nkp/kommander-install.yaml
+!scripts/nkp/vgpu-operator-config.yaml
 scripts/aws/**
 .nkp-image-builder*
 

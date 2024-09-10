@@ -1,0 +1,17 @@
+devicePlugin:
+  config:
+    create: true
+driver:
+  enabled: true
+  version: 535.161.08
+  repository: harbor.infrastructure.cloudnative.nvdlab.net/nvidia
+  licensingConfig:
+    configMapName: licensing-config
+dcgmExporter:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    interval: 15s
+    honorLabels: false
+    additionalLabels:
+      monitoring: apps

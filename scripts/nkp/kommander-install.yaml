@@ -1,0 +1,65 @@
+apiVersion: config.kommander.mesosphere.io/v1alpha1
+kind: Installation
+apps:
+  dex:
+    enabled: true
+  dex-k8s-authenticator:
+    enabled: true
+  kommander:
+    enabled: true
+  kommander-ui:
+    enabled: true
+  kubefed:
+    enabled: true
+  kube-prometheus-stack:
+    enabled: true
+  prometheus-adapter:
+    enabled: true
+  reloader:
+    enabled: true
+  traefik:
+    enabled: true
+  traefik-forward-auth-mgmt:
+    enabled: true
+  gatekeeper:
+    enabled: false
+  git-operator:
+    enabled: true
+  gitea:
+    enabled: false
+  grafana-logging:
+    enabled: false
+  grafana-loki:
+    enabled: false
+  kubetunnel:
+    enabled: false
+  logging-operator:
+    enabled: false
+  nkp-insights-management:
+    enabled: false
+  kubernetes-dashboard:
+    enabled: true
+  ai-navigator-app:
+    enabled: false
+  rook-ceph:
+    enabled: false
+  rook-ceph-cluster:
+    enabled: false
+  velero:
+    enabled: false
+  nvidia-gpu-operator:
+    enabled: true
+    values: |
+      driver:
+        enabled: true
+      dcgmExporter:
+        enabled: true
+        serviceMonitor:
+          enabled: true
+          interval: 15s
+          honorLabels: false
+          additionalLabels:
+            app: nvidia-dcgm-exporter
+            monitoring: apps
+ageEncryptionSecretName: sops-age
+#clusterHostname: ""
