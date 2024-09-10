@@ -15,6 +15,7 @@ bin/**
 !infra/kind/examples/.env.flux-kind-local.yaml
 !.env.sample.yaml
 !.env.tmpl
+!.env-sample
 
 # ignore nkp scripts temporarily
 scripts/nkp/**
