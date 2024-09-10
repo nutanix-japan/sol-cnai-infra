@@ -1,0 +1,104 @@
+version: '3'
+
+tasks:
+
+  default:
+    silent: true
+    internal: false
+    cmds:
+    - task: :helpers:validate
+      vars:
+        REQUIRED_TOOLS_LIST: kubectl helm
+    - task: :helpers:print-current-context
+    requires:
+      vars: [ENVIRONMENT]
+
+  nodes:
+    silent: false
+    deps: [default]
+    #desc: List all the nodes in your cluster
+    cmds:
+    - kubectl get nodes {{.CLI_ARGS | default "-o wide"}}
+
+  pods:
+    silent: false
+    deps: [default]
+    #desc: List all the pods in your cluster
+    cmds:
+    - kubectl get pods {{.CLI_ARGS | default "-A"}}
+
+  kustomizations:
+    silent: false
+    deps: [default]
+    #desc: List all the kustomizations in your cluster
+    cmds:
+    - kubectl get kustomizations {{.CLI_ARGS | default "-A"}}
+
+  helmreleases:
+    silent: false
+    deps: [default]
+    #desc: List all the helmreleases in your cluster
+    cmds:
+    - kubectl get helmreleases {{.CLI_ARGS | default "-A"}}
+
+  helmrepositories:
+    silent: false
+    deps: [default]
+    #desc: List all the helmrepositories in your cluster
+    cmds:
+    - kubectl get helmrepositories {{.CLI_ARGS | default "-A"}}
+
+  gitrepositories:
+    silent: false
+    deps: [default]
+    #desc: List all the gitrepositories in your cluster
+    cmds:
+    - kubectl get gitrepositories {{.CLI_ARGS | default "-A"}}
+
+  certificates:
+    silent: false
+    deps: [default]
+    #desc: List all the certificates in your cluster
+    cmds:
+    - kubectl get certificates {{.CLI_ARGS | default "-A"}}
+    - kubectl get certificaterequests {{.CLI_ARGS | default "-A"}}
+
+  ingresses:
+    silent: false
+    deps: [default]
+    #desc: List all the ingresses in your cluster
+    cmds:
+    - kubectl get ingress {{.CLI_ARGS | default "-A"}}
+
+  services:
+    silent: false
+    deps: [default]
+    #desc: List all the services in your cluster
+    cmds:
+    - kubectl get services {{.CLI_ARGS | default "-A"}}
+
+  endpoints:
+    silent: false
+    deps: [default]
+    #desc: List all the services in your cluster
+    cmds:
+    - kubectl get services {{.CLI_ARGS | default "-A"}}
+
+  taint-gpu-nodes:
+    silent: false
+    desc: Taints GPU Nodes with nvidia.com/gpu.present=true:NoSchedule Taint. Override ex. `task kubectl:taint_gpu_nodes -- ray.io/node-type=worker:NoSchedule`
+    cmds:
+    - kubectl taint node -l nvidia.com/gpu.present=true {{.CLI_ARGS | default "nvidia.com/gpu.present=true:NoSchedule"}}
+
+  untaint-gpu-nodes:
+    silent: false
+    desc: Removes Taints on GPU Nodes (i.e., nvidia.com/gpu.present=true label) with existing dedicated=gpu:NoSchedule Taint. Override ex. `task kubectl:untaint_gpu_nodes -- ray.io/node-type=worker:NoSchedule`
+    cmds:
+    - kubectl taint node -l nvidia.com/gpu.present=true {{.CLI_ARGS | default "nvidia.com/gpu.present=true:NoSchedule-"}}
+
+  drain-gpu-nodes:
+    silent: false
+    prompt: "Are you sure you want to drain all gpu nodes of current workloads?"
+    desc: Drains/Deschedules workloads that have already been schedule on GPU nodes (i.e., with nvidia.com/gpu.present=true label). Uncordon on competion.
+    cmds:
+    - kubectl get node -l nvidia.com/gpu.present=true -o name | cut -d/ -f2 | xargs -I {} sh -c "kubectl drain {} --delete-emptydir-data --ignore-daemonsets --disable-eviction && kubectl uncordon {}"

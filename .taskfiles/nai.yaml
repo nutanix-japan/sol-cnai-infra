@@ -1,0 +1,161 @@
+version: '3'
+
+tasks:
+
+  default:
+    silent: true
+    internal: false
+    cmds:
+    - task: :helpers:validate
+      vars:
+        REQUIRED_TOOLS_LIST: helm kubectl kind
+    - task: :helpers:print-current-context
+    requires:
+      vars: [ENVIRONMENT]
+
+  pre-install:
+    silent: false
+    deps: [default]
+    desc: Deploy NAI Dependencies like Cert Manager, Kserve, Knative
+    cmds:
+      - bash ./scripts/nai/nai-prepare.sh
+    requires:
+      vars: [ENVIRONMENT]
+
+  install:
+    silent: false
+    deps: [default]
+    desc: Install NAI Helm Charts
+    cmds:
+      - ./scripts/nai/nai-deploy.sh
+    requires:
+      vars: [ENVIRONMENT]
+
+  post-install:
+    silent: false
+    deps: [default]
+    desc: Run NAI Post Install Tasks.
+    cmds:
+      - |
+        kubectl create secret generic nutanix-csi-credentials-files \
+          -n ntnx-system --from-literal=key=${FILES_CREDENTIAILS_STRING} \
+          --dry-run -o yaml | kubectl apply -f -
+      - |
+        kubectl create secret tls -n istio-system iep-cert \
+        --cert=.local/certs/${ISTIO_DNS_NAME}_ecc/fullchain.cer \
+        --key=.local/certs/${ISTIO_DNS_NAME}_ecc/${ISTIO_DNS_NAME}.key \
+        --dry-run=client -o yaml | kubectl apply -f -
+      - ./scripts/nai/nai-post.sh
+    requires:
+      vars: [ENVIRONMENT, FILES_CREDENTIAILS_STRING, ISTIO_DNS_NAME]
+
+  deploy-nai:
+    silent: false
+    deps: [default]
+    desc: Deploy NAI End to End
+    cmds:
+      - task nai:pre-install
+      - task nai:install
+      - task nai:post-install
+
+  deploy-istio:
+    silent: false
+    deps: [default]
+    desc: "Deploy Istio 1.20.8"
+    cmds:
+      - helm upgrade --install istio-base base --repo https://istio-release.storage.googleapis.com/charts --version=1.20.8 -n istio-system --create-namespace --wait
+      - helm upgrade --install istiod istiod --repo https://istio-release.storage.googleapis.com/charts --version=1.20.8 -n istio-system --wait --set gateways.securityContext.runAsUser=0 --set gateways.securityContext.runAsGroup=0
+      - helm upgrade --install istio-ingressgateway gateway --repo https://istio-release.storage.googleapis.com/charts --version=1.20.8 -n istio-system --set securityContext.runAsUser=0 --set securityContext.runAsGroup=0 --set containerSecurityContext.runAsUser=0 --set containerSecurityContext.runAsGroup=0
+
+  deploy-knative:
+    silent: false
+    deps: [default]
+    desc: "Deploy Knative 1.13.1"
+    cmds:
+      - helm upgrade --install knative-serving-crds nai-knative-serving-crds --repo https://nutanix.github.io/helm-releases --version=1.13.1 -n knative-serving --create-namespace --wait
+      - helm upgrade --install knative-serving nai-knative-serving --repo https://nutanix.github.io/helm-releases -n knative-serving --version=1.13.1 --wait
+      - helm upgrade --install knative-istio-controller nai-knative-istio-controller --repo https://nutanix.github.io/helm-releases -n knative-serving --version=1.13.1 --wait
+      - kubectl patch configmap config-features -n knative-serving --patch '{"data":{"kubernetes.podspec-nodeselector":"enabled"}}'
+      - kubectl patch configmap config-autoscaler -n knative-serving --patch '{"data":{"enable-scale-to-zero":"false"}}'
+
+  deploy-kserve:
+    silent: false
+    deps: [default]
+    desc: "Deploy Kserve 0.13.1"
+    cmds:
+      - helm upgrade --install kserve-crd oci://ghcr.io/kserve/charts/kserve-crd --version=v0.13.1 -n kserve --create-namespace --wait
+      - helm upgrade --install kserve oci://ghcr.io/kserve/charts/kserve --version=v0.13.1 -n kserve --wait --set kserve.modelmesh.enabled=false --set kserve.controller.image=docker.io/nutanix/nai-kserve-controller --set kserve.controller.tag=v0.13.1
+
+  prepare-nai:
+    deps: [deploy-istio, deploy-knative, deploy-kserve]
+    desc: "Deploy Istio, Knative, and Kserve"
+
+  deploy-nai-helm:
+    silent: false
+    deps: [default]
+    desc: Deploy NAI Helm Charts
+    cmds:
+      - helm repo add ntnx-charts https://nutanix.github.io/helm-releases
+      - helm repo update ntnx-charts
+      - |
+        helm upgrade --install nai-core ntnx-charts/nai-core --version=$NAI_CORE_VERSION -n nai-system --create-namespace --wait \
+        --set imagePullSecret.credentials.username=$DOCKER_USERNAME \
+        --set imagePullSecret.credentials.email=$DOCKER_EMAIL \
+        --set imagePullSecret.credentials.password=$DOCKER_PASSWORD \
+        --insecure-skip-tls-verify \
+        -f ${PWD}/scripts/nai/iep-values-nkp.yaml
+    requires:
+      vars: [ENVIRONMENT, DOCKER_USERNAME, DOCKER_EMAIL, DOCKER_PASSWORD, NAI_CORE_VERSION]
+    preconditions:
+    - sh: '[ -f ${PWD}/scripts/nai/iep-values-nkp.yaml ]'
+      msg: "Please create ${PWD}/scripts/nai/iep-values-nkp.yaml file before running tasks. See README.md for more details."
+
+
+  apply-storageclass:
+    silent: false
+    deps: [default]
+    desc: Apply Nutanix Files Storage Class
+    cmds:
+      - |
+        cat <<EOF | kubectl apply -f -
+        kind: StorageClass
+        apiVersion: storage.k8s.io/v1
+        metadata:
+            name: nai-nfs-storage
+        provisioner: csi.nutanix.com
+        parameters:
+          dynamicProv: ENABLED
+          nfsServerName: files
+          nfsServer: files.odin.cloudnative.nvdlab.net
+          csi.storage.k8s.io/provisioner-secret-name: nutanix-csi-credentials-files
+          csi.storage.k8s.io/provisioner-secret-namespace: ntnx-system
+          csi.storage.k8s.io/node-publish-secret-name: nutanix-csi-credentials-files
+          csi.storage.k8s.io/node-publish-secret-namespace: ntnx-system
+          csi.storage.k8s.io/controller-expand-secret-name: nutanix-csi-credentials-files
+          csi.storage.k8s.io/controller-expand-secret-namespace: ntnx-system
+          storageType: NutanixFiles
+          description: iep-dev$(date +%d%m%y)
+        allowVolumeExpansion: true
+        EOF
+    status:
+    - kubectl get storageclass nai-nfs-storage -o name | grep -i nai-nfs-storage
+
+  patch-knative-ingress-gateway:
+    silent: false
+    deps: [default]
+    desc: Patch Knative Ingress Gateway
+    cmds:
+      - |
+        kubectl patch gateway -n knative-serving knative-ingress-gateway --type merge --patch-file=/dev/stdin <<EOF
+        spec:
+          servers:
+          - hosts:
+            - '*'
+            port:
+              name: https
+              number: 443
+              protocol: HTTPS
+            tls:
+              mode: SIMPLE
+              credentialName: iep-cert
+        EOF

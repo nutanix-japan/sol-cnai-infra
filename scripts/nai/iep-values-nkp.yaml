@@ -1,0 +1,34 @@
+# nai-monitoring stack values for nai-monitoring stack deployment in NKE environment
+naiMonitoring:
+      
+  ## Component scraping node exporter
+  ##
+  nodeExporter:
+    serviceMonitor:
+      enabled: true
+      endpoint:
+        port: http-metrics
+        scheme: http
+        targetPort: 9100
+      namespaceSelector:
+        matchNames:
+        - kommander
+      serviceSelector:
+        matchLabels:
+          app.kubernetes.io/name: prometheus-node-exporter
+          app.kubernetes.io/component: metrics
+          app.kubernetes.io/version: 1.8.1
+
+  ##
+  dcgmExporter:
+    podLevelMetrics: true
+    serviceMonitor:
+      enabled: true
+      endpoint:
+        targetPort: 9400
+      namespaceSelector:
+        matchNames:
+        - kommander
+      serviceSelector:
+        matchLabels:
+          app: nvidia-dcgm-exporter

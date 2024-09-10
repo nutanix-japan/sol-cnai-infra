@@ -1,0 +1,462 @@
+version: '3'
+
+tasks:
+
+  default:
+    silent: true
+    internal: false
+    cmds:
+    - task: :helpers:validate
+      vars:
+        REQUIRED_TOOLS_LIST: nkp docker kind kubectl yq jq
+    - task: :helpers:print-current-context
+    requires:
+      vars: [ENVIRONMENT]
+
+  #############################
+  ## CREATE TASKS
+
+  create-bootstrap-cluster:
+    silent: false
+    deps: [default]
+    desc: "NKP Create Bootstrap cluster. Stores locally on ./${ENVIRONMENT}-bootstrap.conf"
+    cmds:
+    - nkp create bootstrap --kubeconfig ${PWD}/${ENVIRONMENT}-bootstrap.conf
+    - task nkp:get-kind-kubeconfig
+    requires:
+      vars: [ENVIRONMENT]
+    status:
+    - kind get clusters -q | grep -i konvoy-capi-bootstrapper
+
+  ## TODO: Add status check to validate whether the image already exists
+  ## TODO: Add support for base-image support
+  create-nutanix-rocky-94-image:
+    silent: false
+    deps: [default]
+    desc: "Create Nutanix Rocky-9.4 Image"
+    cmds:
+    - nkp create image nutanix rocky-9.4 --endpoint ${NUTANIX_ENDPOINT} --insecure --cluster ${CLUSTER} --subnet ${NUTANIX_SUBNET_NAME}
+    requires:
+      vars: [CLUSTER, NUTANIX_SUBNET_NAME, NUTANIX_ENDPOINT]
+
+  create-nutanix-ubuntu-2204-image:
+    silent: false
+    deps: [default]
+    desc: "Create Nutanix Ubuntu-22.04 Image"
+    cmds:
+    - nkp create image nutanix ubuntu-22.04 --endpoint ${NUTANIX_ENDPOINT} --insecure --cluster ${CLUSTER} --subnet ${NUTANIX_SUBNET_NAME}
+    requires:
+      vars: [CLUSTER, NUTANIX_SUBNET_NAME, NUTANIX_ENDPOINT]
+
+  create-default-nutanix-images:
+    silent: false
+    deps: [default]
+    desc: "Create All Nutanix Default Images. i.e., Rocky-9.4 and Ubuntu-22.04"
+    cmds:
+    - task: create-nutanix-rocky-94-image
+    - task: create-nutanix-ubuntu-2204-image
+
+  create-nutanix-cluster:
+    silent: false
+    deps: [get-kind-kubeconfig]
+    desc: "Create NKP Cluster on Nutanix AHV using kommander-bootstrap-configuration configmap generated from ${PWD}/scripts/nkp/kommander-install.yaml"
+    cmds:
+    - |
+      nkp create cluster nutanix --kubeconfig ${PWD}/${ENVIRONMENT}-bootstrap.conf \
+        -c ${CLUSTER_NAME} \
+        --control-plane-endpoint-ip ${CONTROLPLANE_VIP} \
+        --control-plane-prism-element-cluster ${CLUSTER} \
+        --control-plane-subnets ${NUTANIX_SUBNET_NAME} \
+        --control-plane-vm-image ${NKP_IMAGE} \
+        --csi-storage-container ${STORAGE_CONTAINER} \
+        --endpoint https://${NUTANIX_ENDPOINT}:9440 \
+        --insecure \
+        --worker-prism-element-cluster ${CLUSTER} \
+        --worker-subnets ${NUTANIX_SUBNET_NAME} \
+        --worker-vm-image ${NKP_IMAGE} \
+        --ssh-public-key-file ${SSH_PUBLIC_KEY} \
+        --kubernetes-service-load-balancer-ip-range ${METALLB_IP_RANGE} \
+        --worker-disk-size 300 \
+        --worker-memory 128 \
+        --worker-vcpus 16 \
+        --worker-cores-per-vcpu 1 \
+        --registry-mirror-url=${REGISTRY_URL} \
+        --registry-mirror-username=${REGISTRY_USERNAME} \
+        --registry-mirror-password=${REGISTRY_PASSWORD} \
+        --control-plane-pc-project ${NUTANIX_PROJECT} \
+        --worker-pc-project ${NUTANIX_PROJECT} \
+        {{.CLI_ARGS | default "--verbose 1"}}
+    - kubectl wait --for=condition=ControlPlaneReady "clusters/${CLUSTER_NAME}" -n default --timeout=20m --kubeconfig ${PWD}/${ENVIRONMENT}-bootstrap.conf
+    - kubectl wait --for=condition=InfrastructureReady "clusters/${CLUSTER_NAME}" -n default --timeout=20m --kubeconfig ${PWD}/${ENVIRONMENT}-bootstrap.conf
+    - task nkp:get-cluster-kubeconfig
+    requires:
+      vars: [CLUSTER_NAME, ENVIRONMENT, CONTROLPLANE_VIP, CLUSTER, NUTANIX_SUBNET_NAME, NKP_IMAGE, STORAGE_CONTAINER, NUTANIX_ENDPOINT, SSH_PUBLIC_KEY, METALLB_IP_RANGE, NUTANIX_PROJECT]
+    status:
+    - kubectl get cluster ${CLUSTER_NAME} -o jsonpath='{.status.controlPlaneReady}' --kubeconfig ${PWD}/${ENVIRONMENT}-bootstrap.conf || kubectl get cluster ${CLUSTER_NAME} -o jsonpath='{.status.controlPlaneReady}' --kubeconfig ${PWD}/${ENVIRONMENT}.cfg
+    - kubectl get cluster ${CLUSTER_NAME} -o jsonpath='{.status.infrastructureReady}' --kubeconfig ${PWD}/${ENVIRONMENT}-bootstrap.conf || kubectl get cluster ${CLUSTER_NAME} -o jsonpath='{.status.infrastructureReady}' --kubeconfig ${PWD}/${ENVIRONMENT}.cfg
+    - kubectl get cluster ${CLUSTER_NAME} -o jsonpath='{.status.phase}' --kubeconfig ${PWD}/${ENVIRONMENT}-bootstrap.conf || kubectl get cluster ${CLUSTER_NAME} -o jsonpath='{.status.phase}' --kubeconfig ${PWD}/${ENVIRONMENT}.cfg
+
+  create-kommander-bootstrap-config:
+    silent: false
+    deps: [get-cluster-kubeconfig]
+    desc: "Create Kommander Bootstrap Configuration"
+    cmds:
+    #- kubectl create configmap kommander-bootstrap-configuration -n default --from-file=${PWD}/scripts/nkp/kommander-install.yaml --kubeconfig ${PWD}/${ENVIRONMENT}-bootstrap.conf --dry-run=client -o yaml | kubectl apply --kubeconfig ${PWD}/${ENVIRONMENT}-bootstrap.conf -f -
+    - kubectl create configmap kommander-bootstrap-configuration -n default --from-file=${PWD}/scripts/nkp/kommander-install.yaml --kubeconfig ${PWD}/${ENVIRONMENT}.cfg --dry-run=client -o yaml | kubectl apply --kubeconfig ${PWD}/${ENVIRONMENT}.cfg -f -
+    preconditions:
+    - sh: test -f ${PWD}/scripts/nkp/kommander-install.yaml
+      msg: '${PWD}/scripts/nkp/kommander-install.yaml not found. To generate, run `nkp install kommander --init > ${PWD}/scripts/nkp/kommander-install.yaml` and update accordingly'
+    status:
+    - kubectl get configmap kommander-bootstrap-configuration -n default --kubeconfig ${PWD}/${ENVIRONMENT}.cfg -o name | grep -i kommander-bootstrap-configuration
+
+  create-capi-components:
+    silent: false
+    deps: [get-cluster-kubeconfig]
+    desc: "Create CAPI components on NKP Nutanix Management cluster"
+    cmds:
+    - nkp create capi-components --kubeconfig ${PWD}/${ENVIRONMENT}.cfg
+    requires:
+      vars: [ENVIRONMENT]
+    status:
+    - kubectl get cluster-api -o name --kubeconfig ${PWD}/${ENVIRONMENT}.cfg | grep -i clusterclass.cluster.x-k8s.io/nkp-nutanix
+
+  move-capi-resources:
+    silent: false
+    deps: [create-capi-components]
+    desc: "Move Cluster-API resources from Bootstrap to NKP Nutanix Management cluster"
+    cmds:
+    - task nkp:get-kind-kubeconfig
+    - nkp move capi-resources --from-kubeconfig ${PWD}/${ENVIRONMENT}-bootstrap.conf --to-kubeconfig ${PWD}/${ENVIRONMENT}.cfg
+    - kubectl wait --for=condition=ControlPlaneReady "clusters/${CLUSTER_NAME}" --timeout=20m --kubeconfig ${PWD}/${ENVIRONMENT}.cfg
+    - nkp describe cluster -c ${CLUSTER_NAME} --kubeconfig ${PWD}/${ENVIRONMENT}.cfg
+    requires:
+      vars: [CLUSTER_NAME, ENVIRONMENT]
+    status:
+    - kubectl get cluster ${CLUSTER_NAME} -o name --kubeconfig ${PWD}/${ENVIRONMENT}.cfg | grep -i ${CLUSTER_NAME}
+    - kubectl get cluster ${CLUSTER_NAME} -o jsonpath='{.status.controlPlaneReady}' --kubeconfig ${PWD}/${ENVIRONMENT}.cfg
+    - kubectl get cluster ${CLUSTER_NAME} -o jsonpath='{.status.infrastructureReady}' --kubeconfig ${PWD}/${ENVIRONMENT}.cfg
+    - kubectl get cluster ${CLUSTER_NAME} -o jsonpath='{.status.phase}' --kubeconfig ${PWD}/${ENVIRONMENT}.cfg
+
+  create-gpu-nodepool:
+    silent: false
+    deps: [get-cluster-kubeconfig]
+    desc: "Create GPU Nodepool"
+    cmds:
+    - |
+      # Generate the GPU entries
+      GPU_ENTRIES=$(for i in $(seq 1 $GPU_COUNT_PER_VM); do echo "{\"type\": \"name\", \"name\": \"${GPU_NAME}\"}"; done | jq -s '.')
+
+      nkp create nodepool nutanix --kubeconfig ${PWD}/${ENVIRONMENT}.cfg \
+          --cluster-name ${CLUSTER_NAME} \
+          --prism-element-cluster ${CLUSTER} \
+          --subnets ${NUTANIX_SUBNET_NAME} \
+          --vm-image ${NKP_IMAGE} \
+          --disk-size 300 \
+          --memory 64 \
+          --vcpus 16 \
+          --replicas ${GPU_REPLICA_COUNT} \
+          --wait \
+          ${GPU_POOL} \
+          --dry-run \
+          -o yaml | yq e '(.spec.topology.workers.machineDeployments[] | select(.name == strenv(GPU_POOL)).variables.overrides[] | select(.name == "workerConfig").value.nutanix.machineDetails) += {"gpus": '"${GPU_ENTRIES}"'}' | kubectl apply --kubeconfig ${PWD}/${ENVIRONMENT}.cfg -f -
+    - sleep 60 && kubectl wait --for=condition=Ready --timeout=600s machines -n default -l topology.cluster.x-k8s.io/deployment-name=${GPU_POOL} --kubeconfig ${PWD}/${ENVIRONMENT}.cfg
+    requires:
+      vars: [CLUSTER_NAME, ENVIRONMENT, CLUSTER, NUTANIX_SUBNET_NAME, NKP_IMAGE, GPU_POOL, GPU_COUNT_PER_VM, GPU_NAME]
+    status:
+    - nkp get nodepools -c ${CLUSTER_NAME} --kubeconfig ${PWD}/${ENVIRONMENT}.cfg | grep ${GPU_POOL}
+
+  #############################
+  ## POST INSTALL TASKS
+
+  configure-gpu-license:
+    silent: false
+    deps: [get-cluster-kubeconfig]
+    desc: "Configure NVIDIA GPU License Server ConfigMap. Required for vGPUs."
+    cmds:
+    - |
+      kubectl create configmap licensing-config -n kommander \
+      --from-file=scripts/nkp/gridd.conf \
+      --from-file=scripts/nkp/client_configuration_token.tok \
+      --kubeconfig ${PWD}/${ENVIRONMENT}.cfg --dry-run=client -o yaml | kubectl apply --kubeconfig ${PWD}/${ENVIRONMENT}.cfg -f -
+    preconditions:
+    - sh: test -f ${PWD}/${ENVIRONMENT}.cfg
+      msg: '${PWD}/{{.CLUSTER_NAME}}.cfg not found, please run task nkp:get-cluser-kubeconfig'
+    - sh: test -f ${PWD}/scripts/nkp/client_configuration_token.tok
+      msg: '${PWD}/client_configuration_token.tok not found, please define as reuqired by NVIDIA GPU Licensing'
+    - sh: test -f ${PWD}/scripts/nkp/gridd.conf
+      msg: '${PWD}/gridd.conf not found, please define as reuqired by NVIDIA GPU Licensing'
+    requires:
+      vars: [CLUSTER_NAME, ENVIRONMENT]
+    status:
+    - kubectl get configmap licensing-config -n kommander --kubeconfig ${PWD}/${ENVIRONMENT}.cfg -o name | grep -i licensing-config
+
+  configure-nutanix-license:
+    silent: false
+    deps: [get-cluster-kubeconfig]
+    desc: "Configure Nutanix License Secret. Required for Nutanix Kubernetes Platform Pro+"
+    cmds:
+    - kubectl apply -f ${PWD}/scripts/nkp/license.yaml --kubeconfig ${PWD}/${ENVIRONMENT}.cfg
+    preconditions:
+    - sh: test -f ${PWD}/scripts/nkp/license.yaml
+      msg: '${PWD}/scripts/nkp/license.yaml not found, please define as reuqired by Nutanix Licensing'
+    requires:
+      vars: [CLUSTER_NAME, ENVIRONMENT]
+    status:
+    - kubectl get secret nutanix-license -n kube-system --kubeconfig ${PWD}/${ENVIRONMENT}.cfg -o name | grep -i nutanix-license
+
+  #############################
+  ## DELETE TASKS
+
+  delete-bootstrap-cluster:
+    silent: false
+    deps: [get-kind-kubeconfig]
+    desc: "Deletes bootstrap cluster"
+    cmds:
+    - nkp delete bootstrap --kubeconfig ${PWD}/${ENVIRONMENT}-bootstrap.conf
+    preconditions:
+    - sh: kind get clusters -q | grep -i konvoy-capi-bootstrapper
+      msg: 'konvoy-capi-bootstrapper not found, nothing to delete'
+    requires:
+      vars: [ENVIRONMENT]
+
+  delete-gpu-nodepool:
+    silent: false
+    deps: [get-cluster-kubeconfig]
+    desc: "Deletes GPU Nodepool from NKP Cluster"
+    cmds:
+    - nkp delete nodepool --kubeconfig ${PWD}/${ENVIRONMENT}.cfg --cluster-name ${CLUSTER_NAME} ${GPU_POOL}
+    - kubectl wait --for=delete --timeout=600s machines -n default -l topology.cluster.x-k8s.io/deployment-name=${GPU_POOL} --kubeconfig ${PWD}/${ENVIRONMENT}.cfg
+    preconditions:
+    - sh: kubectl get machinedeployment -n default -o name --kubeconfig ${PWD}/${ENVIRONMENT}.cfg | grep {{.GPU_POOL}}
+      msg: '{{.GPU_POOL}} not found in {{.CLUSTER_NAME}} cluster, nothing to delete'
+    requires:
+      vars: [CLUSTER_NAME, ENVIRONMENT, GPU_POOL]
+
+  delete-nkp-cluster:
+    silent: false
+    deps: [get-cluster-kubeconfig]
+    desc: "Deletes NKP Cluster from Nutanix"
+    cmds:
+    - nkp delete cluster --self-managed --cluster-name ${CLUSTER_NAME} --kubeconfig ${PWD}/${ENVIRONMENT}.cfg
+    preconditions:
+    - sh: kubectl get cluster ${CLUSTER_NAME} -o name --kubeconfig ${PWD}/${ENVIRONMENT}.cfg | grep -i ${CLUSTER_NAME}
+      msg: '{{.CLUSTER_NAME}} not found in {{.ENVIRONMENT}} cluster, nothing to delete'
+    requires:
+      vars: [CLUSTER_NAME, ENVIRONMENT]
+
+  cleanup-nkp-full:
+    silent: false
+    deps: [default]
+    desc: "Cleanup NKP Cluster and Bootstrap Cluster"
+    cmds:
+    - task nkp:delete-bootstrap-cluster
+    - task nkp:delete-gpu-nodepool
+    - task nkp:delete-nkp-cluster
+    requires:
+      vars: [CLUSTER_NAME, ENVIRONMENT]
+
+  #############################
+  ## ORCHESTRATED TASKS
+
+  deploy-nkp-minimal:
+    silent: true
+    deps: [default]
+    desc: "Creates NKP Cluster End to End with Kommander"
+    cmds:
+    - task nkp:create-bootstrap-cluster
+    - task nkp:create-nutanix-cluster
+    - task nkp:create-kommander-bootstrap-config
+    - task nkp:create-capi-components
+    - task nkp:move-capi-resources
+    - task nkp:monitor-kommander-deployment
+    - task nkp:delete-bootstrap-cluster
+
+  deploy-nkp-full:
+    silent: true
+    deps: [default]
+    desc: "Creates NKP Cluster End to End with Kommander with GPU NodePool"
+    cmds:
+    - task nkp:create-bootstrap-cluster
+    - task nkp:create-nutanix-cluster
+    - task nkp:create-kommander-bootstrap-config
+    - task nkp:configure-gpu-license
+    - task nkp:create-capi-components
+    - task nkp:move-capi-resources
+    - task nkp:create-gpu-nodepool
+    - task nkp:monitor-kommander-deployment
+    - task nkp:configure-nutanix-license
+    - task nkp:delete-bootstrap-cluster
+
+  #############################
+  ## MISC TASKS - can be used for debugging or day-2 operations
+
+  get-kind-kubeconfig:
+    silent: false
+    deps: [default]
+    desc: Get NKP Bootstrap Cluster Kubeconfig
+    cmds:
+    - kind get kubeconfig -n konvoy-capi-bootstrapper -q | tee ${PWD}/${ENVIRONMENT}-bootstrap.conf
+    - echo "export KUBECONFIG=${PWD}/${ENVIRONMENT}-bootstrap.conf" && kubectl config use-context kind-konvoy-capi-bootstrapper --kubeconfig ${PWD}/${ENVIRONMENT}-bootstrap.conf
+    status:
+    - kubectl get nodes --kubeconfig ${PWD}/${ENVIRONMENT}-bootstrap.conf
+
+  get-cluster-kubeconfig:
+    silent: false
+    deps: [default]
+    desc: Get NKP Cluster Kubeconfig
+    cmds:
+    - nkp get kubeconfig -c ${CLUSTER_NAME} --kubeconfig ${PWD}/${ENVIRONMENT}-bootstrap.conf | tee $HOME/.kube/${ENVIRONMENT}.cfg ${PWD}/${ENVIRONMENT}.cfg
+    - echo "export KUBECONFIG=${PWD}/${ENVIRONMENT}.cfg" && kubectl config use-context ${CLUSTER_NAME}-admin@${CLUSTER_NAME} --kubeconfig ${PWD}/${ENVIRONMENT}.cfg
+    requires:
+      vars: [CLUSTER_NAME, ENVIRONMENT]
+    status:
+    - kubectl get nodes --kubeconfig ${PWD}/${ENVIRONMENT}.cfg
+
+  scale-gpu-nodepool:
+    silent: false
+    deps: [get-cluster-kubeconfig]
+    desc: "Scale GPU Nodepool"
+    cmds:
+    - nkp scale nodepool --kubeconfig ${PWD}/${ENVIRONMENT}.cfg --cluster-name ${CLUSTER_NAME} ${GPU_POOL} --replicas ${GPU_REPLICA_COUNT}
+    - kubectl wait --for=condition=Ready --timeout=600s machines -n default -l topology.cluster.x-k8s.io/deployment-name=${GPU_POOL} --kubeconfig ${PWD}/${ENVIRONMENT}.cfg
+    preconditions:
+    - sh: kubectl get machinedeployment -n default -o name --kubeconfig ${PWD}/${ENVIRONMENT}.cfg  | grep {{.GPU_POOL}}
+      msg: '{{.GPU_POOL}} not found in {{.CLUSTER_NAME}} cluster'
+    requires:
+      vars: [CLUSTER_NAME, ENVIRONMENT, GPU_POOL, GPU_REPLICA_COUNT]
+
+  bootstrap-watch:
+    silent: true
+    deps: [get-kind-kubeconfig]
+    desc: Watch Bootstrap resources during NKP Cluster create
+    cmds:
+    - watch -n 1 "kubectl get cluster-api --kubeconfig ${PWD}/${ENVIRONMENT}-bootstrap.conf"
+
+  monitor-kommander-deployment:
+    silent: true
+    deps: [get-cluster-kubeconfig]
+    desc: Monitor Kommander Deployment until Completion
+    cmds:
+    - kubectl -n kommander wait --for condition=Ready helmreleases,kustomization --all --timeout 30m --kubeconfig ${PWD}/${ENVIRONMENT}.cfg
+    - nkp open dashboard --kubeconfig ${PWD}/${ENVIRONMENT}.cfg
+    
+  cluster-watch:
+    silent: true
+    deps: [get-cluster-kubeconfig]
+    desc: Watch NKP Cluster resources during NKP Cluster Migration
+    cmds:
+    - watch -n 1 "kubectl get cluster-api --kubeconfig ${PWD}/${ENVIRONMENT}.cfg"
+
+  #############################
+  ## AIRGAP TASKS
+
+  unpack-airgap-bin:
+    silent: false
+    deps: [default]
+    desc: "Unpack airgapped bundle and move to the extracted directory"
+    vars:
+      NKP_AIRGAP_BIN: ${PWD}/bin/nkp-air-gapped-bundle_v2.12.0_linux_amd64.tar.gz
+    cmds:
+    - tar -xvf {{.NKP_AIRGAP_BIN}} -C ${PWD}/bin
+    status:
+    - ls -l ${PWD}/bin/nkp-v2.12.0/{container-images,application-charts,application-repositories,cli,kib}
+
+  load-airgap-docker-images:
+    silent: false
+    deps: [unpack-airgap-bin]
+    desc: "Load NKP Airgapped Images into Local Docker Engine"
+    vars:
+      NKP_BUNDLE_DIR: ${PWD}/bin/nkp-v2.12.0
+    cmds:
+    - docker load -i {{.NKP_BUNDLE_DIR}}/nkp-image-builder-image-v0.13.1.tar
+    - docker load -i {{.NKP_BUNDLE_DIR}}/konvoy-bootstrap-image-v2.12.0.tar
+    status:
+    - docker images | grep -i mesosphere/nkp-image-builder
+    - docker images | grep -i mesosphere/konvoy-bootstrap
+
+  create-ubuntu-os-bundle:
+    silent: false
+    deps: [load-airgap-docker-images]
+    desc: "Create OS Bundle"
+    vars:
+      NKP_BUNDLE_DIR: ${PWD}/bin/nkp-v2.12.0
+      OS_BUNDLE_DIR: '{{.NKP_BUNDLE_DIR}}/kib/artifacts'
+      OS: ubuntu-22.04
+    cmds:
+    - nkp create package-bundle --artifacts-directory {{.OS_BUNDLE_DIR}} {{.OS}}
+    status:
+    - ls -l {{.NKP_BUNDLE_DIR}}/kib/artifacts/1.29.6_ubuntu_22.04_x86_64.tar.gz
+
+  create-nutanix-ubuntu-image:
+    silent: false
+    deps: [create-ubuntu-os-bundle]
+    desc: "Create Nutanix AHV Image from Base Image"
+    vars:
+      NKP_BUNDLE_DIR: ${PWD}/bin/nkp-v2.12.0
+      OS_BUNDLE_DIR: '{{.NKP_BUNDLE_DIR}}/kib/artifacts'
+      OS: ubuntu-22.04
+    cmds:
+    - |
+      nkp create image nutanix {{.OS}} \
+      --artifacts-directory {{.OS_BUNDLE_DIR}} \
+      --endpoint ${NUTANIX_ENDPOINT} --insecure \
+      --cluster ${CLUSTER} \
+      --subnet ${NUTANIX_SUBNET_NAME} \
+      --source-image ${BASE_IMAGE}
+    requires:
+      vars: [CLUSTER, BASE_IMAGE, NUTANIX_SUBNET_NAME, NUTANIX_ENDPOINT]
+
+  cleanup-airgap-full:
+    silent: false
+    deps: [default]
+    desc: "Clean NKP Airgapped Images from Local Environment"
+    vars:
+      NKP_BUNDLE_DIR: ${PWD}/bin/nkp-v2.12.0
+    cmds:
+    - docker rmi mesosphere/nkp-image-builder:v0.13.1
+    - docker rmi mesosphere/konvoy-bootstrap:v2.12.0
+    - rm -rf {{.NKP_BUNDLE_DIR}}
+
+  push-container-images:
+    silent: false
+    deps: [load-airgap-docker-images]
+    desc: "Push Container Images to Local/Private Registry"
+    vars:
+      NKP_BUNDLE_DIR: ${PWD}/bin/nkp-v2.12.0
+    cmds:
+    - nkp push bundle --bundle {{.NKP_BUNDLE_DIR}}/container-images/konvoy-image-bundle-v2.12.0.tar --to-registry=${REGISTRY_URL} --to-registry-username=${REGISTRY_USERNAME} --to-registry-password=${REGISTRY_PASSWORD}
+    - nkp push bundle --bundle {{.NKP_BUNDLE_DIR}}/container-images/kommander-image-bundle-v2.12.0.tar --to-registry=${REGISTRY_URL} --to-registry-username=${REGISTRY_USERNAME} --to-registry-password=${REGISTRY_PASSWORD}
+    - nkp push bundle --bundle {{.NKP_BUNDLE_DIR}}/container-images/nkp-catalog-applications-image-bundle-v2.12.0.tar --to-registry=${REGISTRY_URL} --to-registry-username=${REGISTRY_USERNAME} --to-registry-password=${REGISTRY_PASSWORD}
+    requires:
+      vars: [REGISTRY_URL, REGISTRY_USERNAME, REGISTRY_PASSWORD]
+    preconditions:
+    - sh: docker pull ${REGISTRY_URL}/nutanix-cloud-native/cloud-provider-nutanix/controller
+      msg: 'Unable to pull ${REGISTRY_URL}/nutanix-cloud-native/cloud-provider-nutanix/controller. Please ensure the image is available in the registry'
+    status:
+    - docker images | grep -i ${REGISTRY_URL}/nutanix-cloud-native/cloud-provider-nutanix/controller
+
+  create-airgapped-nutanix-cluster:
+    silent: false
+    desc: "Create NKP Cluster on Nutanix AHV using airgapped bundle"
+    cmds:
+    - task nkp:create-nutanix-cluster -- --airgapped --selfmanaged
+
+  deploy-airgapped-nkp-full:
+    silent: true
+    deps: [default]
+    desc: "Creates NKP Cluster End to End with Kommander using Airgapped Bundle"
+    cmds:
+    - task nkp:unpack-airgap-bin
+    - task nkp:load-airgap-docker-images
+    - task nkp:create-ubuntu-os-bundle
+    - task nkp:create-nutanix-ubuntu-image
+    - task nkp:push-container-images
+    - task nkp:create-airgapped-nutanix-cluster
+    - task nkp:create-kommander-bootstrap-config
+    - task nkp:configure-gpu-license
+    - task nkp:create-capi-components
+    - task nkp:move-capi-resources
+    - task nkp:create-gpu-nodepool
+    - task nkp:monitor-kommander-deployment
+    - task nkp:configure-nutanix-license
+    - task nkp:delete-bootstrap-cluster

@@ -1,0 +1,35 @@
+version: '3'
+
+tasks:
+
+  default:
+    cmds:
+    - task: validate
+
+  validate:
+    silent: true
+    internal: true
+    cmds:
+    - 'echo -e "\e[32mINFO:\e[0m Validating following tools: \e[32m{{.REQUIRED_TOOLS_LIST}}\e[0m"'
+    - for: {var: REQUIRED_TOOLS_LIST, split: ',', as: TOOL}
+      cmd: '[ -n "$(which {{ .TOOL }})" ] || (echo "ERROR: failed to find required tool: {{ .TOOL }}." && exit 1;)'
+
+  print-minimal-vars:
+    silent: true
+    internal: true
+    cmds:
+    - |
+      echo -e "\n\e[32mINFO:\e[0m Printing Current Environment Details:"
+      echo -e "\e[35m CURRENT_ENV_CONFIG:\e[0m $(basename `pwd`)/.env-${ENVIRONMENT}"
+      echo -e "\e[35m TARGET_PC_ENDPOINT:\e[0m ${NUTANIX_ENDPOINT}"
+      echo -e "\e[35m TARGET_K8S_CLUSTER_NAME:\e[0m ${CLUSTER_NAME}"
+
+  print-current-context:
+    silent: true
+    internal: true
+    deps: [print-minimal-vars]
+    cmds:
+    - |
+      echo -e "\e[35m CURRENT_KUBECONFIG:\e[0m $KUBECONFIG"
+      echo -e "\e[35m CURRENT_K8S_CONTEXT:\e[0m $(kubectl config current-context)"
+      echo -e "\e[33mWARNING\e[0m: If INCORRECT, cancel and run: \e[33meval \$(task switch-shell-env)\e[0m"

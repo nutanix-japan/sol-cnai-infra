@@ -1,0 +1,412 @@
+version: '3'
+
+vars:
+  AWS_CREDENTIALS_FILE: ${HOME}/.aws/credentials
+  AWS_CONFIG_FILE: ${HOME}/.aws/config
+  EKS_CLUSTER_NAME: '{{.EKS_CLUSTER_NAME | default "nai-eks-ea" }}'
+  EKS_CPU_NODEGROUP_TYPE: '{{.EKS_CPU_NODEGROUP_TYPE | default "t2.large" }}'
+  EKS_GPU_NODEGROUP_TYPE: '{{.EKS_GPU_NODEGROUP_TYPE | default "g6.2xlarge" }}'
+
+tasks:
+
+  default:
+    silent: true
+    internal: false
+    cmds:
+    - task: :helpers:validate
+      vars:
+        REQUIRED_TOOLS_LIST: aws docker eksctl helm uuidgen jq grep
+    - task: :helpers:print-current-context
+    requires:
+      vars: [ENVIRONMENT]
+
+  config-creds:
+    silent: true
+    deps: [default]
+    desc: Configures local aws credentials
+    cmds:
+    - aws configure set aws_access_key_id {{.AWS_ACCESS_KEY_ID}}
+    - aws configure set aws_secret_access_key {{.AWS_SECRET_ACCESS_KEY}}
+    - aws configure set default.region {{.AWS_REGION}}
+    - aws configure list
+    requires:
+      vars: [AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION]
+    status:
+    - cat {{.AWS_CREDENTIALS_FILE}} | grep -i "{{.AWS_SECRET_ACCESS_KEY}}"
+    - cat {{.AWS_CONFIG_FILE}} | grep -i "{{.AWS_REGION}}"
+
+  clean-creds:
+    silent: true
+    deps: [default]
+    prompt: "This will delete your local aws credentials"
+    desc: Deletes local aws credentials files. Requires Confirmation.
+    cmds:
+    - rm -f {{.AWS_CREDENTIALS_FILE}} {{.AWS_CONFIG_FILE}}
+    requires:
+      vars: [AWS_CREDENTIALS_FILE, AWS_CONFIG_FILE]
+    preconditions:
+    - sh: '[ -f {{.AWS_CREDENTIALS_FILE}} ] || [ -f {{.AWS_CONFIG_FILE}} ]'
+      msg: 'No aws credentials found, nothing to delete'
+
+  validate-route53-zone:
+    silent: false
+    deps: [config-creds]
+    desc: Validates Route 53 Hosted Zone matches environemnt configs
+    cmds:
+    - aws route53 list-hosted-zones --output json | jq -r .HostedZones[].Id | grep -i {{.AWS_HOSTED_ZONE_ID}}
+    requires:
+      vars: [AWS_HOSTED_ZONE_ID]
+
+  create-route53-record:
+    silent: false
+    deps: [config-creds]
+    desc: Creates Single Route 53 record on AWS_HOSTED_ZONE_ID. Ex. task aws:create-route53-record DNS_RECORD_NAME=*.new-cluster.cloudnative.nvdlab.net DNS_RECORD_IP=10.10.10.1
+    vars:
+      DNS_RECORD_NAME: "{{.DNS_RECORD_NAME}}"
+      DNS_RECORD_IP: "{{.DNS_RECORD_IP}}"
+    cmds:
+    - |
+      aws route53 change-resource-record-sets --hosted-zone-id {{.AWS_HOSTED_ZONE_ID}} --no-cli-pager --change-batch '{
+          "Comment": "Creating a record set",
+          "Changes": [
+            {
+              "Action": "UPSERT",
+              "ResourceRecordSet": {
+                "Name": "{{.DNS_RECORD_NAME}}",
+                "Type": "A",
+                "TTL": 300,
+                "ResourceRecords": [
+                  {
+                    "Value": "{{.DNS_RECORD_IP}}"
+                  }
+                ]
+              }
+            }
+          ]
+        }'
+    requires:
+      vars: [AWS_HOSTED_ZONE_ID, DNS_RECORD_NAME, DNS_RECORD_IP]
+
+  create-acme-sh-certs:
+    silent: true
+    deps: [default]
+    desc: Creates Certificates using acme.sh with wildcard domain (*.DNS_RECORD_NAME). Ex. task aws:create-acme-sh-certs DNS_RECORD_NAME=new-cluster.cloudnative.nvdlab.net
+    cmds:
+    - mkdir -p "$(pwd)/.local/certs" "$(pwd)/.local/{{.ENVIRONMENT}}/certs/{{.DNS_RECORD_NAME}}" 
+    - docker run --rm -it -v "$(pwd)/.local/certs":/acme.sh neilpang/acme.sh --register-account -m $DOMAIN_ADMIN_EMAIL
+    - |
+      docker run --rm -it \
+      -v "$(pwd)/.local/certs":/acme.sh \
+      -e AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID \
+      -e AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY \
+      neilpang/acme.sh --issue \
+      --dns dns_aws -d "{{.DNS_RECORD_NAME}}" \
+      --dns dns_aws -d "*.{{.DNS_RECORD_NAME}}" \
+      --standalone \
+      --force
+    - 'cp -rf $(pwd)/.local/certs/{{.DNS_RECORD_NAME}}_ecc/*.{cer,key} $(pwd)/.local/{{.ENVIRONMENT}}/certs/{{.DNS_RECORD_NAME}}'
+    requires:
+      vars: [DOMAIN_ADMIN_EMAIL, DNS_RECORD_NAME, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY]
+
+  create-vpc:
+    silent: false
+    deps: [config-creds]
+    desc: "Create a VPC with Public and Private Subnets for EKS using CloudFormation"
+    cmds:
+      - |
+        aws cloudformation create-stack \
+          --stack-name nai-eks-vpc-stack \
+          --template-url https://s3.us-west-2.amazonaws.com/amazon-eks/cloudformation/2020-10-29/amazon-eks-vpc-private-subnets.yaml \
+          --capabilities CAPABILITY_IAM \
+          --on-failure DELETE \
+          --no-cli-pager
+      - aws cloudformation wait stack-create-complete --stack-name nai-eks-vpc-stack    
+    status:
+      - aws ec2 describe-vpcs --filters "Name=tag:aws:cloudformation:stack-name,Values=nai-eks-vpc-stack" --query "Vpcs[0].VpcId" --output text --no-cli-pager | grep -iv none
+
+  create-eks-cluster:
+    silent: false
+    deps: [config-creds]
+    desc: Creates EKS Cluster with 1 node in us-east-1a, us-east-1b, us-east-1d
+    cmds:
+    - |
+      VPC_ID=$(aws ec2 describe-vpcs --filters "Name=tag:aws:cloudformation:stack-name,Values=nai-eks-vpc-stack" --query "Vpcs[0].VpcId" --output text)
+      PUBLIC_SUBNET_IDS=$(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$VPC_ID" "Name=tag:aws:cloudformation:logical-id,Values=PublicSubnet*" --query "Subnets[*].SubnetId" --output text --no-cli-pager | tr [:space:] "," | sed 's/,$//')
+      PRIVATE_SUBNET_IDS=$(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$VPC_ID" "Name=tag:aws:cloudformation:logical-id,Values=PrivateSubnet*" --query "Subnets[*].SubnetId" --output text --no-cli-pager | tr [:space:] "," | sed 's/,$//')
+      eksctl create cluster --name {{.EKS_CLUSTER_NAME}} \
+        --version 1.30 \
+        --vpc-private-subnets "$PRIVATE_SUBNET_IDS" \
+        --vpc-public-subnets "$PUBLIC_SUBNET_IDS" \
+        --nodegroup-name standard-workers \
+        --node-type {{.EKS_CPU_NODEGROUP_TYPE}} \
+        --nodes 1 \
+        --nodes-min 1 \
+        --nodes-max 3 \
+        --timeout=40m \
+        --ssh-access \
+        --ssh-public-key ${SSH_PUBLIC_KEY} \
+        --region us-east-1 \
+        --auto-kubeconfig \
+        --node-ami-family Ubuntu2204 \
+        --asg-access \
+        --with-oidc
+    requires:
+      vars: [SSH_PUBLIC_KEY, EKS_CLUSTER_NAME]
+    status:
+    - eksctl get cluster -o json | jq -r .[].Name | grep {{.EKS_CLUSTER_NAME}}
+
+  get-eks-kubeconfig:
+    silent: false
+    deps: [config-creds]
+    desc: Get kubeconfig for EKS Cluster
+    cmds:
+    - eksctl utils write-kubeconfig --cluster {{.EKS_CLUSTER_NAME}} --kubeconfig ${HOME}/.kube/eksctl/clusters/{{.EKS_CLUSTER_NAME}}
+    - cp ${HOME}/.kube/eksctl/clusters/{{.EKS_CLUSTER_NAME}} ${HOME}/.kube/{{.EKS_CLUSTER_NAME}}.cfg
+    status:
+    - kubectl get nodes -o wide
+
+  create-eks-cluster-role:
+    silent: false
+    deps: [create-eks-cluster]
+    desc: "Create an EKS Role for the cluster"
+    cmds:
+    - |
+      eksctl create iamserviceaccount \
+        --name nai-eks-cluster-role \
+        --namespace kube-system \
+        --cluster {{.EKS_CLUSTER_NAME}} \
+        --attach-policy-arn arn:aws:iam::aws:policy/service-role/AmazonEFSCSIDriverPolicy \
+        --attach-policy-arn arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy \
+        --attach-policy-arn arn:aws:iam::aws:policy/AmazonEKSClusterPolicy \
+        --attach-policy-arn arn:aws:iam::aws:policy/AmazonEKSServicePolicy \
+        --attach-policy-arn arn:aws:iam::aws:policy/AmazonEKSVPCResourceController \
+        --attach-policy-arn arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy \
+        --approve \
+        --override-existing-serviceaccounts
+    status:
+    - eksctl get iamserviceaccount --cluster {{.EKS_CLUSTER_NAME}} --namespace kube-system | grep nai-eks-cluster-role
+
+  create-ec2-worker-role:
+    silent: false
+    deps: [create-eks-cluster]
+    desc: "Create an EC2 Worker Role for the cluster"
+    cmds:
+    - |
+      eksctl create iamserviceaccount \
+        --name nai-ec2-worker-role \
+        --namespace kube-system \
+        --cluster {{.EKS_CLUSTER_NAME}} \
+        --attach-policy-arn arn:aws:iam::aws:policy/service-role/AmazonEFSCSIDriverPolicy \
+        --attach-policy-arn arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly \
+        --attach-policy-arn arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy \
+        --attach-policy-arn arn:aws:iam::aws:policy/AmazonElasticFileSystemClientFullAccess \
+        --attach-policy-arn arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy \
+        --attach-policy-arn arn:aws:iam::aws:policy/AmazonEKSClusterPolicy \
+        --approve \
+        --override-existing-serviceaccounts
+    status:
+    - eksctl get iamserviceaccount --cluster {{.EKS_CLUSTER_NAME}} --namespace kube-system nai-ec2-worker-role
+
+  create-gpu-nodegroup:
+    silent: false
+    deps: [create-ec2-worker-role]
+    desc: Creates GPU Nodegroup on EKS Cluster
+    cmds:
+    - |
+      eksctl create nodegroup \
+        --cluster {{.EKS_CLUSTER_NAME}} \
+        --name gpu-workers \
+        --node-type {{.EKS_GPU_NODEGROUP_TYPE}} \
+        --nodes 1 \
+        --nodes-min 1 \
+        --nodes-max 2 \
+        --node-volume-size 100 \
+        --timeout=40m \
+        --ssh-access \
+        --ssh-public-key ${SSH_PUBLIC_KEY} \
+        --node-ami-family Ubuntu2204 \
+        --instance-prefix {{.EKS_CLUSTER_NAME}} \
+        --install-nvidia-plugin
+    requires:
+      vars: [SSH_PUBLIC_KEY, EKS_CLUSTER_NAME]
+    status:
+    - eksctl get nodegroup --cluster {{.EKS_CLUSTER_NAME}} | grep gpu-workers
+
+  create-security-group-efs:
+    silent: false
+    deps: [config-creds]
+    desc: "Create a security group for EFS"
+    cmds:
+      - |
+        VPC_ID=$(aws ec2 describe-vpcs --filters "Name=tag:aws:cloudformation:stack-name,Values=nai-eks-vpc-stack" --query "Vpcs[0].VpcId" --output text)
+        aws ec2 create-security-group \
+          --group-name nai-sg-efs \
+          --description "Security group for EFS" \
+          --vpc-id $VPC_ID --no-cli-pager
+      - |
+        SG_EFS_ID=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=nai-sg-efs" --query "SecurityGroups[0].GroupId" --output text)
+        EKS_SG_ID=$(aws ec2 describe-security-groups --filters "Name=tag:aws:eks:cluster-name,Values={{.EKS_CLUSTER_NAME}}" --query "SecurityGroups[0].GroupId" --output text)
+        aws ec2 authorize-security-group-ingress \
+          --group-id $SG_EFS_ID \
+          --protocol tcp \
+          --port 2049 \
+          --source-group $EKS_SG_ID --no-cli-pager
+    status:
+    - aws ec2 describe-security-groups --filters "Name=group-name,Values=nai-sg-efs" --query "SecurityGroups[0].GroupId" --output text --no-cli-pager | grep -iv none
+
+  create-efs:
+    silent: false
+    deps: [create-security-group-efs]
+    desc: "Create an EFS and attach the security group"
+    vars:
+      EFS_CREATION_TOKEN:
+        sh: 'echo $(uuidgen)'
+    cmds:
+      - |
+        aws efs create-file-system \
+          --creation-token {{.EFS_CREATION_TOKEN}} \
+          --performance-mode generalPurpose \
+          --throughput-mode bursting \
+          --encrypted \
+          --tags Key=Name,Value=nai-efs \
+          --region us-east-1 --no-cli-pager
+      - |
+        VPC_ID=$(aws ec2 describe-vpcs --filters "Name=tag:aws:cloudformation:stack-name,Values=nai-eks-vpc-stack" --query "Vpcs[0].VpcId" --output text)
+        EFS_ID=$(aws efs describe-file-systems --query "FileSystems[?CreationToken=='{{.EFS_CREATION_TOKEN}}'].FileSystemId" --output text)
+        SG_EFS_ID=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=nai-sg-efs" --query "SecurityGroups[0].GroupId" --output text)  
+        SUBNET_ID=$(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$VPC_ID" --query "Subnets[0].SubnetId" --output text)
+        aws efs create-mount-target \
+          --file-system-id $EFS_ID \
+          --subnet-id $SUBNET_ID \
+          --security-groups $SG_EFS_ID --no-cli-pager
+    status:
+    - aws efs describe-file-systems --query "FileSystems[?Tags[?Key=='Name' && Value=='nai-efs']].FileSystemId" --output text --no-cli-pager | grep -iv none
+
+  update-eks-security-group:
+    silent: false
+    deps: [create-security-group-efs]
+    desc: "Update the EKS security group to allow SSH Inbound Rule for EFS"
+    cmds:
+      - |
+        EKS_SG_ID=$(aws ec2 describe-security-groups --filters "Name=tag:aws:eks:cluster-name,Values={{.EKS_CLUSTER_NAME}}" --query "SecurityGroups[0].GroupId" --output text)
+        SG_EFS_ID=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=nai-sg-efs" --query "SecurityGroups[0].GroupId" --output text) 
+        aws ec2 authorize-security-group-ingress \
+          --group-id $EKS_SG_ID \
+          --protocol tcp \
+          --port 22 \
+          --source-group $SG_EFS_ID --no-cli-pager
+
+  ## TODO: This may no be needed anymore :)
+  associate-iam-oidc-provider:
+    silent: false
+    deps: [create-eks-cluster]
+    desc: Associate IAM OIDC Provider
+    cmds:
+    - eksctl utils associate-iam-oidc-provider --region=us-east-1 --cluster={{.EKS_CLUSTER_NAME}} --approve
+
+  create-iam-efs-csi-sa:
+    silent: false
+    deps: [create-eks-cluster]
+    desc: Create IAM Service Account for EFS CSI Controller
+    cmds:
+    - |
+      IAMSA_ROLE_NAME=AmazonEKS_EFS_CSI_DriverRole
+      eksctl create iamserviceaccount \
+        --name efs-csi-controller-sa \
+        --namespace kube-system \
+        --cluster {{.EKS_CLUSTER_NAME}} \
+        --role-name $IAMSA_ROLE_NAME \
+        --role-only \
+        --attach-policy-arn arn:aws:iam::aws:policy/service-role/AmazonEFSCSIDriverPolicy \
+        --approve \
+        --override-existing-serviceaccounts
+    status:
+    - eksctl get iamserviceaccount --cluster {{.EKS_CLUSTER_NAME}} --namespace kube-system | grep efs-csi-controller-sa
+
+  create-efs-storage-class:
+    silent: false
+    deps: [create-efs]
+    desc: Create EFS Storage Class
+    cmds:
+    - |
+      FS_ID=$(aws efs describe-file-systems --query "FileSystems[?Tags[?Key=='Name' && Value=='nai-efs']].FileSystemId" --output text)
+      cat <<EOF | kubectl apply --kubeconfig ${HOME}/.kube/eksctl/clusters/{{.EKS_CLUSTER_NAME}} -f -
+      kind: StorageClass
+      apiVersion: storage.k8s.io/v1
+      metadata:
+        name: nai-nfs-storage
+      provisioner: efs.csi.aws.com
+      parameters:
+        provisioningMode: "efs-ap"
+        fileSystemId: ${FS_ID}
+        directoryPerms: "777"
+        basePath: "/"
+        uid: "0"
+        gid: "0"
+      reclaimPolicy: Delete
+      volumeBindingMode: Immediate
+      EOF
+    status:
+    - kubectl get storageclass --kubeconfig ${HOME}/.kube/eksctl/clusters/{{.EKS_CLUSTER_NAME}} | grep nai-nfs-storage
+  
+  install-eks-addons:
+    silent: false
+    deps: [create-eks-cluster]
+    desc: "Install EKS addons, ie., Amazon EFS and EBS CSI Driver"
+    cmds:
+    - eksctl create addon --name aws-efs-csi-driver --cluster {{.EKS_CLUSTER_NAME}} --region us-east-1
+    - eksctl create addon --name aws-ebs-csi-driver --cluster {{.EKS_CLUSTER_NAME}} --region us-east-1
+
+  cleanup-minimal:
+    silent: false
+    deps: [default]
+    desc: "Cleanup all resources created"
+    cmds:
+      - eksctl delete nodegroup --cluster={{.EKS_CLUSTER_NAME}} --name gpu-workers
+      - eksctl delete cluster --name {{.EKS_CLUSTER_NAME}} --region us-east-1
+    preconditions:
+    - sh: eksctl get cluster -o json | jq -r .[].Name | grep {{.EKS_CLUSTER_NAME}}
+      msg: '{{.EKS_CLUSTER_NAME}} not found, nothing to delete'
+
+  cleanup-full:
+    silent: false
+    deps: [default]
+    desc: "Cleanup all resources created"
+    cmds:
+      - eksctl delete nodegroup --cluster={{.EKS_CLUSTER_NAME}} --name gpu-workers --drain=false
+      - eksctl delete nodegroup --cluster={{.EKS_CLUSTER_NAME}} --name standard-workers --drain=false
+      - eksctl delete cluster --name {{.EKS_CLUSTER_NAME}} --region us-east-1
+      - |
+        EFS_ID=$(aws efs describe-file-systems --query "FileSystems[?Tags[?Key=='Name' && Value=='nai-efs']].FileSystemId" --output text)
+        aws efs delete-file-system --file-system-id $EFS_ID
+      - |
+        SG_EFS_ID=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=nai-sg-efs" --query "SecurityGroups[0].GroupId" --output text)  
+        aws ec2 delete-security-group --group-id $SG_EFS_ID
+      - aws iam delete-role --role-name nai-ec2-worker-role
+      - aws iam delete-role --role-name nai-eks-cluster-role
+      - aws cloudformation delete-stack --stack-name nai-eks-vpc-stack
+    preconditions:
+    - sh: eksctl get cluster -o json | jq -r .[].Name | grep {{.EKS_CLUSTER_NAME}}
+      msg: '{{.EKS_CLUSTER_NAME}} not found, nothing to delete'
+  
+  deploy-eks-cluster-full:
+    silent: false
+    deps: [default]
+    desc: Creates EKS Cluster end-to-end
+    cmds:
+    - task aws:create-vpc
+    - task aws:create-eks-cluster
+    - task aws:get-eks-kubeconfig
+    - task aws:create-eks-cluster-role
+    - task aws:create-ec2-worker-role
+    - task aws:create-gpu-nodegroup
+    #- task aws:associate-iam-oidc-provider
+    - task aws:configure-efs-full
+
+  configure-efs-full:
+    - task aws:install-eks-addons
+    - task aws:create-security-group-efs
+    - task aws:create-efs
+    #- task aws:create-iam-efs-csi-sa
+    - task aws:create-efs-storage-class
+    - task aws:update-eks-security-group

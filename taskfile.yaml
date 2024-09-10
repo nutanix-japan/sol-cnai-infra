@@ -1,0 +1,64 @@
+version: '3'
+
+dotenv: ['.env-{{.ENVIRONMENT}}']
+
+includes:
+  helpers: ./.taskfiles/helpers.yaml
+  kubectl:
+    taskfile: ./.taskfiles/kubectl.yaml
+    aliases: [k]
+  flux: ./.taskfiles/flux.yaml
+  nkp: ./.taskfiles/nkp.yaml
+  nai: ./.taskfiles/nai.yaml
+  aws: ./.taskfiles/aws.yaml
+  troubleshoot:
+    taskfile: ./.taskfiles/troubleshoot.yaml
+    aliases: [ts]
+
+tasks:
+
+  default:
+    silent: true
+    desc: Show task list
+    summary: |
+      ## TLDR;
+
+      run `eval $(task switch-shell-env)` to switch between environments.
+
+      To deploy nkp cluster, run `task nkp:deploy-nkp-full`
+      To deploy eks cluster, run `task aws:deploy-eks-full`
+      To deploy nai within either cluster, run `task nai:deploy-nai-full`
+
+      To see list of tasks, run `task --list` or `task --list-all`
+    cmds:
+      - task --summary
+      - task: helpers:print-minimal-vars
+    preconditions:
+    - sh: '[ -f .env-{{.ENVIRONMENT}} ]'
+      msg: "Please create .env-{{.ENVIRONMENT}} file before running tasks. See README.md for more details."
+    requires:
+      vars: [ENVIRONMENT]
+
+  deploy-nkai-kaos:
+    desc: Deploy NKP and NAI End-to-End, No Coffee Breaks...Good Luck!
+    summary: |
+      This task will deploy NKP and NAI
+    cmds:
+      - task nkp:deploy-nkp-full
+      - task nai:nai-deploy
+    requires:
+      vars: [ENVIRONMENT]
+
+  switch-shell-env:
+    silent: true
+    desc: Prompt for Existing Cluster Instance and Set in Local Shell. ex. eval $(task switch-shell-env)
+    vars:
+      ENV_CONFIG_FILE:
+        sh: 'gum choose --header "Select existing Environment to load." $(find .env-* -type f -not -name .env-example -maxdepth 0 -print)'
+      ENVIRONMENT:
+        sh: 'echo {{.ENV_CONFIG_FILE}} | sed -e "s/\.env-//g"'
+    cmds:
+    - |
+      echo "export ENVIRONMENT={{.ENVIRONMENT}}" && \
+      echo "export CLUSTER_NAME=${CLUSTER_NAME}" && \
+      echo "export KUBECONFIG=${HOME}/.kube/${CLUSTER_NAME}.cfg"
