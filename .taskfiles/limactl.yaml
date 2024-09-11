@@ -1,0 +1,93 @@
+version: '3'
+
+env:
+  LIMA_OS: '{{default "ubuntu-22-04-vm" .LIMA_OS}}'
+
+vars:
+  #LIMA_OPTIONS: rocky-linux-9-4 ubuntu-22-04 ubuntu-24-04
+  LIMA_OS_TEMPLATE: ${PWD}/examples/lima/{{.LIMA_OS}}.yaml
+
+tasks:
+
+  default:
+    silent: true
+    internal: false
+    cmds:
+    - task: :helpers:validate
+      vars:
+        REQUIRED_TOOLS_LIST: limactl jq
+
+  select-vm:
+    silent: false
+    deps: [default]
+    platforms: [darwin]
+    desc: "Choose Lima VM to Load, based on examples/lima/*.yaml"
+    vars:
+      LIMA_OS:
+        sh: 'gum choose --header "Select existing Lima OS Template to load." $(find examples/lima/*.yaml -type f -maxdepth 0 -print | cut -d/ -f3 | cut -d. -f1)'
+    cmds:
+      - task limactl:exec-vm LIMA_OS={{.LIMA_OS}}
+  
+  cleanup-all-vms:
+    silent: false
+    deps: [default]
+    platforms: [darwin]
+    desc: "Stop and Delete All Local Lima VMs"
+    cmds:
+    - limactl list -f json | jq -r 'select(.status == "Running") | .name' | xargs -I {} limactl stop --tty=false --force {}
+    - limactl list -f json | jq -r 'select(.status == "Stopped") | .name' | xargs -I {} limactl delete --tty=false {}
+    - limactl prune --tty=false 
+
+  create-vm:
+    silent: false
+    deps: [default]
+    platforms: [darwin]
+    desc: "Creates Lima VM"
+    cmds:
+      - limactl create --tty=false {{.LIMA_OS_TEMPLATE}}
+    status:
+    - limactl list -f json {{.LIMA_OS}} | jq -r .name | grep -i {{.LIMA_OS}}
+
+  start-vm:
+    silent: false
+    deps: [create-vm]
+    platforms: [darwin]
+    desc: "Start Lima VM"
+    cmds:
+      - limactl start --tty=false {{.LIMA_OS}}
+    status:
+    - limactl list -f json {{.LIMA_OS}} | jq -r .status | grep -i running
+
+  exec-vm:
+    silent: false
+    deps: [start-vm]
+    platforms: [darwin]
+    desc: "Shell into Lima VM"
+    cmds:
+    - limactl shell {{.LIMA_OS}}
+    interactive: true
+
+  stop-vm:
+    silent: false
+    deps: [default]
+    platforms: [darwin]
+    desc: "Stop Lima VM"
+    cmds:
+    - limactl stop {{.LIMA_OS}}
+    preconditions:
+    - sh: 'limactl list | grep -i {{.LIMA_OS}}'
+      msg: "VM {{.LIMA_OS}} is not running"
+    status:
+    - limactl list -f json {{.LIMA_OS}} | jq -r .status | grep -i stopped
+
+  delete-vm:
+    silent: false
+    deps: [default]
+    platforms: [darwin]
+    desc: "Delete Lima VM"
+    cmds:
+    - limactl list -f json {{.LIMA_OS}} | jq -r 'select(.status == "Running") | .name' | xargs -I {} limactl stop --tty=false --force {}
+    - limactl list -f json {{.LIMA_OS}} | jq -r 'select(.status == "Stopped") | .name' | xargs -I {} limactl delete --tty=false {}
+    preconditions:
+    - sh: 'limactl list | grep -i {{.LIMA_OS}}'
+      msg: "VM {{.LIMA_OS}} doesn't exist"

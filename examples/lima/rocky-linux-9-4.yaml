@@ -1,0 +1,35 @@
+# This template requires Lima v0.8.3 or later.
+
+# NOTE: EL8-based distros are known not to work on M1 chips: https://github.com/lima-vm/lima/issues/841
+# EL9-based distros are known to work.
+
+images:
+# Hint: run `limactl prune` to invalidate the cache
+- location: "https://dl.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud.latest.x86_64.qcow2"
+  arch: "x86_64"
+- location: "https://dl.rockylinux.org/pub/rocky/9/images/aarch64/Rocky-9-GenericCloud.latest.aarch64.qcow2"
+  arch: "aarch64"
+
+mounts:
+- location: "~"
+  writable: true
+- location: "/tmp/lima"
+  writable: true
+
+provision:
+- mode: system
+  ## This script install go-task, a task runner, in the VM
+  script: |
+    #!/usr/bin/bash
+    set -eux -o pipefail
+    yum install -y make
+
+message: |
+  To begin, run `make install-linux-dependencies` to install bare min. requirements on the host.
+  To deploy workstation cli tools, easiest method is to leverage nix/devbox shell:
+  1. run `task workstation:install-devbox`
+  2. run `devbox shell`
+  ------
+  run `eval $(task switch-shell-env)` to switch between environments.
+  To see list of tasks, run `task --list` or `task --list-all`
+  ------

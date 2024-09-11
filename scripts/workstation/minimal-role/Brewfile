@@ -1,0 +1,7 @@
+brew "age"
+brew "gum"
+brew "gomplate"
+brew "go-task"
+brew "jq"
+brew "yq"
+brew "age"

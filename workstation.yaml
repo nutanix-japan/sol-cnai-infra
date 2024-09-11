@@ -1,0 +1,121 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+version: "3"
+
+env:
+  USER_ROLE: '{{default "minimal-role" .USER_ROLE}}'
+
+vars:
+  BREW_FILE: "{{.ROOT_DIR}}/scripts/workstation/{{.USER_ROLE}}/Brewfile"
+  ARKADE_FILE: "{{.ROOT_DIR}}/scripts/workstation/{{.USER_ROLE}}/Arkfile"
+  KREW_FILE: "{{.ROOT_DIR}}/scripts/workstation/{{.USER_ROLE}}/Krewfile"
+
+tasks:
+
+  brew:
+    prompt: This will install Brew (if not exists) and dependent packages... Do you wish to continue?
+    platforms: [darwin]
+    desc: Install Brew and dependent packages. Only support on MacOS.
+    cmds:
+    - '[ -n "$(command -v brew)" ] || (NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)")'
+    - brew bundle --file {{.BREW_FILE}}
+    preconditions:
+    - {msg: "Missing Brewfile", sh: "test -f {{.BREW_FILE}}",}
+
+  arkade:
+    prompt: This will install Arkade and dependent packages... Do you wish to continue?
+    platforms: [darwin, linux, windows]
+    desc: Install Arkade and dependent packages. Arkade is useful for cross-platform package management.
+    vars:
+      ARKADE_PACKAGES:
+        sh: cat {{.ARKADE_FILE}} | xargs | sed 's/ /,/g'
+    cmds:
+    - '[ -n "$(command -v arkade)" ] || (curl -sLS https://get.arkade.dev | sudo sh)'
+    - for: {var: ARKADE_PACKAGES, split: ',', as: ARKADE_PACKAGE}
+      cmd: 'arkade get {{ .ARKADE_PACKAGE }} && sudo cp -a ${HOME}/.arkade/bin/{{ .ARKADE_PACKAGE }} /usr/local/bin/'
+
+  krew:
+    prompt: This will install Krew and dependent kubectl plugins... Do you wish to continue?
+    platforms: [darwin, linux, windows]
+    deps: [arkade]
+    desc: Install Krew dependencies and dependent packages. Kubectl plugins are useful for managing multiple k8s clusters.
+    vars:
+      KREW_FILE:
+        sh: cat {{.KREW_FILE}} | xargs | sed 's/ /,/g'
+    cmds:
+    - '[ -n "$(command -v krew)" ] || (arkade get krew)'
+    - for: {var: KREW_FILE, split: ',', as: KREW_FILE}
+      cmd: 'krew update && krew install {{ .KREW_FILE }}'
+    preconditions:
+    - {msg: "Missing Arkade", sh: "command -v arkade",}
+
+  install-linux-packages:
+    platforms: [linux]
+    dir: '{{.USER_WORKING_DIR}}'
+    prompt: This will install linux minimal dependent pre-reqs... Do you wish to continue?
+    silent: true
+    desc: Check kubectl plugins and if not available, install
+    cmds:
+    - '[ -n "$(command -v gum)" ] || ./scripts/common/install_linux_gum.sh'
+    - '[ -n "$(command -v age)" ] || ./scripts/common/install_linux_age.sh'
+    #- '[ -n "$(command -v ipcalc)" ] || ./scripts/common/install_linux_ipcalc.sh'
+    - 'if (grep -q -i ubuntu /etc/os-release 1> /dev/null 2>&1);then (./scripts/workstation/{{.USER_ROLE}}/install_linux_ubuntu.sh);fi'
+
+  install-packages:
+    prompt: This will install all required packages locally... Are you certain you wish to continue?
+    platforms: [darwin, linux, windows]
+    desc: Install minimal workstation packages. For advanced local development/admin packages, run `task workstation:install-packages USER_ROLE=devops-role`
+    cmds:
+    - '{{if eq OS "darwin"}}task workstation:brew --yes{{end}}'
+    - '{{if eq OS "linux"}}task workstation:install-linux-packages --yes{{end}}'
+    - task workstation:arkade --yes
+    - task workstation:krew --yes
+
+  load-dotfiles:
+    prompt: WARNING!! This will load scripts/dotfiles into ${HOME} directory... Are you certain you wish to continue?
+    platforms: [linux]
+    dir: '{{.USER_WORKING_DIR}}'
+    desc: Loads scripts/dotfiles into home directorya and installs kube-ps1 PS1 prompt and ZSH. Only for new linux use cases
+    cmds:
+    - ./scripts/dotfiles/install_kube-ps1.sh
+    - cp -r scripts/dotfiles/. $HOME
+    - echo "Loading of .dotfiles is complete, proceed by reloading shell using `source ~/.bashrc`"
+
+  install-devbox:
+    prompt: This will install Devbox on local machine, interactively...Would you like to proceed?
+    dir: '{{.USER_WORKING_DIR}}'
+    desc: Installs devbox interactively
+    cmd: curl -fsSL https://get.jetify.com/devbox | bash
+    interactive: true
+
+  install-dkp:
+    prompt: This will install dkp cli on local machine...Would you like to proceed?
+    deps: [install-docker]
+    silent: true
+    platforms: [darwin, linux]
+    dir: '{{.USER_WORKING_DIR}}'
+    desc: Installs Nutanix DKP cli tool
+    cmds:
+    - ./scripts/common/install_linux_dkp.sh
+    - arkade get kind && sudo cp -a ${HOME}/.arkade/bin/kind /usr/local/bin/
+    interactive: true
+
+  install-docker:
+    silent: true
+    platforms: [linux]
+    desc: Installs Docker on Linux machine. This will enable, start and configure current user to run docker cli.
+    cmds:
+    - '[ -n "$(command -v docker)" ] || ./scripts/common/install_linux_docker.sh'
+
+  bootstrap-jumpbox:
+    prompt: This should ONLY be installed on NEW jumpbox as it will install ALL packages and override local dotfiles... Are you certain you wish to continue?
+    platforms: [linux]
+    desc: Bootstraps ALL platform engineering development and admin CLI tools and packages
+    cmds:
+    - |
+      {{if eq OS "linux"}}
+        task workstation:install-linux-packages USER_ROLE=devops-role --yes
+        task workstation:arkade USER_ROLE=devops-role --yes
+        task workstation:krew USER_ROLE=devops-role --yes
+        task workstation:install-dkp --yes
+        task workstation:load-dotfiles --yes
+      {{end}}

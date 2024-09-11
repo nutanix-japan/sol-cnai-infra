@@ -11,6 +11,13 @@ includes:
   nkp: ./.taskfiles/nkp.yaml
   nai: ./.taskfiles/nai.yaml
   aws: ./.taskfiles/aws.yaml
+  harbor: ./.taskfiles/harbor.yaml
+  limactl:
+    taskfile: ./.taskfiles/limactl.yaml
+    aliases: [lima]
+  workstation:
+    taskfile: ./.taskfiles/workstation.yaml
+    aliases: [ws]
   troubleshoot:
     taskfile: ./.taskfiles/troubleshoot.yaml
     aliases: [ts]
@@ -50,15 +57,20 @@ tasks:
       vars: [ENVIRONMENT]
 
   switch-shell-env:
-    silent: true
-    desc: Prompt for Existing Cluster Instance and Set in Local Shell. ex. eval $(task switch-shell-env)
+    silent: false
+    desc: Prompt for Existing Environment Configs and Set in Local Shell. ex. eval $(task switch-shell-env)
     vars:
       ENV_CONFIG_FILE:
-        sh: 'gum choose --header "Select existing Environment to load." $(find .env-* -type f -not -name .env-example -maxdepth 0 -print)'
+        sh: 'gum choose --header "Select existing Environment to load." $(find .env-* -type f -not -name .env-sample -maxdepth 0 -print)'
       ENVIRONMENT:
-        sh: 'echo {{.ENV_CONFIG_FILE}} | sed -e "s/\.env-//g"'
+        #sh: 'echo {{.ENV_CONFIG_FILE}} | sed -e "s/\.env-//g"'
+        sh: 'source {{.ENV_CONFIG_FILE}} && echo $ENVIRONMENT'
+      CLUSTER_NAME:
+        sh: 'source {{.ENV_CONFIG_FILE}} && echo $CLUSTER_NAME'
     cmds:
-    - |
-      echo "export ENVIRONMENT={{.ENVIRONMENT}}" && \
-      echo "export CLUSTER_NAME=${CLUSTER_NAME}" && \
-      echo "export KUBECONFIG=${HOME}/.kube/${CLUSTER_NAME}.cfg"
+    - echo "export KUBECONFIG=${HOME}/.kube/{{.ENVIRONMENT}}.cfg"
+    - echo "export ENVIRONMENT={{.ENVIRONMENT}}"
+    - echo "export CLUSTER_NAME={{.CLUSTER_NAME}}"
+    preconditions:
+    - sh: command -v gum
+      msg: "Please install gum to switch between environments. See https://github.com/charmbracelet/gum?tab=readme-ov-file#installation."

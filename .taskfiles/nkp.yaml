@@ -152,8 +152,8 @@ tasks:
           --subnets ${NUTANIX_SUBNET_NAME} \
           --vm-image ${NKP_IMAGE} \
           --disk-size 300 \
-          --memory 64 \
-          --vcpus 16 \
+          --memory 128 \
+          --vcpus 32 \
           --replicas ${GPU_REPLICA_COUNT} \
           --wait \
           ${GPU_POOL} \

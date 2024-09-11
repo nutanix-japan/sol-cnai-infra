@@ -1,0 +1,21 @@
+# This template requires Lima v0.7.0 or later.
+images:
+# Hint: run `limactl prune` to invalidate the cache
+- location: "https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img"
+  arch: "x86_64"
+- location: "https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-arm64.img"
+  arch: "aarch64"
+
+mounts:
+- location: "~"
+  writable: true
+- location: "/tmp/lima"
+  writable: true
+
+provision:
+- mode: system
+  ## This script install go-task, a task runner, in the VM
+  script: |
+    #!/usr/bin/bash
+    set -eux -o pipefail
+    sudo apt install -y make

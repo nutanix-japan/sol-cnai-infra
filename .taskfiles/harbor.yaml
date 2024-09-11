@@ -1,0 +1,140 @@
+version: '3'
+
+vars:
+  HARBOR_VERSION: v2.9.4
+  HARBOR_TLS_DIR: "${PWD}/bin/harbor/certs"
+  HARBOR_LOCALHOST_IP:
+    sh: |
+        {{if eq OS "darwin"}}ipconfig getifaddr en0{{end}}
+        {{if eq OS "linux"}}hostname -I | awk '{print $1}'{{end}}
+  HARBOR_HOST: harbor.{{.HARBOR_LOCALHOST_IP}}.nip.io
+
+tasks:
+
+  default:
+    silent: true
+    internal: false
+    cmds:
+    - task: :helpers:validate
+      vars:
+        REQUIRED_TOOLS_LIST: kubectl flux git helm jq base64 docker-compose curl tar openssl
+
+  deploy-harbor:
+    silent: false
+    deps: [default]
+    desc: "Install Harbor Registry"
+    cmds:
+    - task: download-harbor
+    - task: generate-self-signed-certs
+    - task: set-docker-certs
+    - task: configure-harbor
+    - task: install-harbor
+    - task: verify-installation
+
+  download-harbor:
+    silent: false
+    deps: [default]
+    desc: "Download Harbor"
+    cmds:
+    - curl -sSOL https://github.com/goharbor/harbor/releases/download/{{.HARBOR_VERSION}}/harbor-offline-installer-{{.HARBOR_VERSION}}.tgz -o ${PWD}/bin/harbor-offline-installer-{{.HARBOR_VERSION}}.tgz
+    - tar -xzvf harbor-offline-installer-{{.HARBOR_VERSION}}.tgz -C ${PWD}/bin
+    status:
+    - find ${PWD}/bin/harbor/{harbor.yml.tmpl,common.sh,install.sh} -type f
+
+  generate-self-signed-certs:
+    silent: false
+    deps: [download-harbor]
+    desc: "Generate Self-Signed Certificates for Harbor Local Registry"
+    cmds:
+      - '[ -d {{.HARBOR_TLS_DIR}} ] || mkdir-p {{.HARBOR_TLS_DIR}}'
+      - openssl genrsa -out {{.HARBOR_TLS_DIR}}/ca.key 4096
+      - openssl req -x509 -new -nodes -key {{.HARBOR_TLS_DIR}}/ca.key -sha256 -days 1024 -out {{.HARBOR_TLS_DIR}}/ca.crt -subj "/CN=harborroot"
+      - openssl genrsa -out {{.HARBOR_TLS_DIR}}/tls.key 2048
+      - openssl req -new -key {{.HARBOR_TLS_DIR}}/tls.key -subj /CN={{.HARBOR_HOST}} -out {{.HARBOR_TLS_DIR}}/server.csr
+      - openssl x509 -req -extfile <(printf "subjectAltName=IP:{{.HARBOR_LOCALHOST_IP}}") -days 1024 -in {{.HARBOR_TLS_DIR}}/server.csr -CA {{.HARBOR_TLS_DIR}}/ca.crt -CAkey {{.HARBOR_TLS_DIR}}/ca.key -CAcreateserial -out {{.HARBOR_TLS_DIR}}/tls.crt
+      - cp {{.HARBOR_TLS_DIR}}/tls.crt {{.HARBOR_TLS_DIR}}/tls.crt_convert
+      - openssl x509 -inform PEM -in {{.HARBOR_TLS_DIR}}/tls.crt_convert -out {{.HARBOR_TLS_DIR}}/tls.cert
+    status:
+    - find {{.HARBOR_TLS_DIR}}/{tls.cert,tls.key,ca.crt,ca.key} -type f
+
+  set-docker-certs:
+    silent: false
+    deps: [generate-self-signed-certs]
+    platforms: [linux]
+    desc: "Set Harbor Certificates in local Docker instance"
+    cmds:
+      - '[ -d /etc/docker/certs.d/{{.HARBOR_HOST}} ] || mkdir-p /etc/docker/certs.d/{{.HARBOR_HOST}}'
+      - sudo cp {{.HARBOR_TLS_DIR}}/{tls.cert,tls.key,ca.crt} /etc/docker/certs.d/{{.HARBOR_HOST}}/.
+      - sudo systemctl restart docker
+    status:
+    - find {{.HARBOR_TLS_DIR}}/{tls.cert,tls.key,ca.crt,ca.key} -type f
+
+  configure-harbor:
+    silent: false
+    deps: [set-docker-certs]
+    desc: "Configure Harbor install file"
+    cmds:
+      - |
+        cat <<EOF > ${PWD}/bin/harbor/harbor.yml
+        hostname: {{.HARBOR_HOST}}
+        http:
+          port: 80
+        https:
+          port: 443
+          certificate: {{.HARBOR_TLS_DIR}}/tls.crt
+          private_key: {{.HARBOR_TLS_DIR}}/tls.key
+        harbor_admin_password: Nutanix.1
+        database:
+          password: Nutanix.1
+          max_idle_conns: 100
+          max_open_conns: 900
+          conn_max_idle_time: 0
+        data_volume: /data
+        trivy:
+          ignore_unfixed: false
+          skip_update: false
+        jobservice:
+          max_job_workers: 10
+          logger_sweeper_duration: 1
+          job_loggers:
+            - STD_OUTPUT
+            - FILE
+        notification:
+          webhook_job_max_retry: 3
+          webhook_job_http_client_timeout: 3
+        chart:
+          absolute_url: disabled
+        log:
+          level: info
+          local:
+            rotate_count: 50
+            rotate_size: 200M
+            location: /var/log/harbor
+        proxy:
+          http_proxy:
+          https_proxy:
+          no_proxy:
+          components:
+            - core
+            - jobservice
+            - trivy
+        _version: {{.HARBOR_VERSION}}
+        EOF
+    status:
+    - find ${PWD}/bin/harbor/harbor.yml -type f
+
+  install-harbor:
+    silent: false
+    deps: [default]
+    platforms: [linux]
+    desc: "Install Harbor"
+    cmds:
+    - sudo ${PWD}/bin/harbor/install.sh --with-trivy
+
+
+  verify-installation:
+    silent: false
+    deps: [default]
+    desc: "Verify Harbor Installation"
+    cmds:
+      - sudo docker-compose ps

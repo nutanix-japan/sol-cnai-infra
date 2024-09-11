@@ -48,9 +48,8 @@ task kaboom
 ## Odin KABOOM (E2E) - New Cluster Walkthrough on Odin
 
 ```bash
-
-## switch environment
-eval $(task switch-shell-env)
+## set environment
+source .env-odin-nai-nkp-mgx
 
 ## create ubuntu image if new cluster - 15 min
 task nkp:create-nutanix-ubuntu-2204-image
@@ -64,6 +63,10 @@ task aws:create-acme-sh-certs DNS_RECORD_NAME=objects.odin.cloudnative.nvdlab.ne
 task aws:create-route53-record DNS_RECORD_NAME=files.odin.cloudnative.nvdlab.net DNS_RECORD_IP=10.28.174.151
 task aws:create-route53-record DNS_RECORD_NAME=files.odin.cloudnative.nvdlab.net DNS_RECORD_IP=10.28.174.152
 task aws:create-route53-record DNS_RECORD_NAME=files.odin.cloudnative.nvdlab.net DNS_RECORD_IP=10.28.174.153
+
+
+## set environment
+source .env-odin-nai-nkp-mgx
 
 ## create DNS Host record - 1 min
 task aws:create-route53-record DNS_RECORD_NAME=*.nkp.${CLUSTER_NAME}.odin.cloudnative.nvdlab.net DNS_RECORD_IP=10.28.174.211

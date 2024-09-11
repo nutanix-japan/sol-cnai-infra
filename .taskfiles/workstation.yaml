@@ -1,0 +1,115 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+version: "3"
+
+env:
+  USER_ROLE: '{{default "minimal-role" .USER_ROLE}}'
+
+vars:
+  BREW_FILE: "{{.ROOT_DIR}}/scripts/workstation/{{.USER_ROLE}}/Brewfile"
+  ARKADE_FILE: "{{.ROOT_DIR}}/scripts/workstation/{{.USER_ROLE}}/Arkfile"
+  KREW_FILE: "{{.ROOT_DIR}}/scripts/workstation/{{.USER_ROLE}}/Krewfile"
+
+tasks:
+
+  brew:
+    prompt: This will install Brew (if not exists) and dependent packages... Do you wish to continue?
+    platforms: [darwin]
+    desc: Install Brew and dependent packages. Only support on MacOS.
+    cmds:
+    - '[ -n "$(command -v brew)" ] || (NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)")'
+    - brew bundle --file {{.BREW_FILE}}
+    preconditions:
+    - {msg: "Missing Brewfile", sh: "test -f {{.BREW_FILE}}",}
+
+  arkade:
+    prompt: This will install Arkade and dependent packages... Do you wish to continue?
+    platforms: [darwin, linux, windows]
+    desc: Install Arkade and dependent packages. Arkade is useful for cross-platform package management.
+    vars:
+      ARKADE_PACKAGES:
+        sh: cat {{.ARKADE_FILE}} | xargs | sed 's/ /,/g'
+    cmds:
+    - '[ -n "$(command -v arkade)" ] || (curl -sLS https://get.arkade.dev | sudo sh)'
+    - for: {var: ARKADE_PACKAGES, split: ',', as: ARKADE_PACKAGE}
+      cmd: 'arkade get {{ .ARKADE_PACKAGE }} && sudo cp -a ${HOME}/.arkade/bin/{{ .ARKADE_PACKAGE }} /usr/local/bin/'
+
+  krew:
+    prompt: This will install Krew and dependent kubectl plugins... Do you wish to continue?
+    platforms: [darwin, linux, windows]
+    desc: Install Krew dependencies and dependent packages. Kubectl plugins are useful for managing multiple k8s clusters.
+    vars:
+      KREW_FILE:
+        sh: cat {{.KREW_FILE}} | xargs | sed 's/ /,/g'
+    cmds:
+    - '[ "$DEVBOX_SHELL_ENABLED" == "1" ] || devbox shell -q'
+    - for: {var: KREW_FILE, split: ',', as: KREW_FILE}
+      cmd: 'krew update && krew install {{ .KREW_FILE }}'
+
+  install-linux-packages:
+    platforms: [linux]
+    dir: '{{.USER_WORKING_DIR}}'
+    prompt: This will install linux minimal dependent pre-reqs... Do you wish to continue?
+    silent: true
+    desc: Install linux minimal dependent pre-reqs
+    cmds:
+    - './scripts/workstation/{{.USER_ROLE}}/install_linux_packages.sh'
+    - '[ -n "$(command -v gum)" ] || ./scripts/common/install_linux_gum.sh'
+    - '[ -n "$(command -v age)" ] || ./scripts/common/install_linux_age.sh'
+
+  load-dotfiles:
+    prompt: WARNING!! This will load scripts/dotfiles into ${HOME} directory... Are you certain you wish to continue?
+    platforms: [linux]
+    dir: '{{.USER_WORKING_DIR}}'
+    desc: Loads scripts/dotfiles into home directorya and installs kube-ps1 PS1 prompt and ZSH. Only for new linux use cases
+    cmds:
+    - ./scripts/dotfiles/install_kube-ps1.sh
+    - cp -r scripts/dotfiles/. $HOME
+    - echo "Loading of .dotfiles is complete, proceed by reloading shell using `source ~/.bashrc`"
+
+  install-devbox:
+    silent: false
+    prompt: This will install Devbox on local machine...Would you like to proceed?
+    dir: '{{.USER_WORKING_DIR}}'
+    platforms: [linux]
+    desc: Installs nix and devbox interactively based on USER_ROLE.
+    cmds: 
+    - curl -fsSL https://get.jetify.com/devbox | FORCE=1 bash
+    - curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm
+    - devbox shell -q
+    status:
+    - '[ "$DEVBOX_SHELL_ENABLED" == "1" ]'
+
+  install-dkp:
+    prompt: This will install dkp cli on local machine...Would you like to proceed?
+    deps: [install-docker]
+    silent: true
+    platforms: [darwin, linux]
+    dir: '{{.USER_WORKING_DIR}}'
+    desc: Installs Nutanix DKP cli tool
+    cmds:
+    - ./scripts/common/install_linux_dkp.sh
+    interactive: true
+
+  install-docker:
+    silent: false
+    platforms: [linux]
+    desc: Installs Docker on Linux machine. This will enable, start and configure current user to run docker cli.
+    cmds:
+    - '[ -n "$(command -v docker)" ] || ./scripts/common/install_linux_docker.sh'
+    status:
+    - sudo docker ps -a -q
+
+  bootstrap-jumpbox:
+    prompt: This should ONLY be installed on NEW jumpbox as it will install ALL packages and override local dotfiles... Are you certain you wish to continue?
+    platforms: [linux]
+    desc: Bootstraps ALL platform engineering development and admin CLI tools and packages
+    cmds:
+    - |
+      {{if eq OS "linux"}}
+        task workstation:install-linux-packages --yes
+        task workstation:install-devbox --yes
+        task workstation:krew USER_ROLE=devops-role --yes
+        task workstation:install-docker --yes
+        task workstation:load-dotfiles --yes
+      {{end}}
+
