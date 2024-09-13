@@ -18,7 +18,9 @@
     "fluxcd@2.2.3",
     "stern@1.28.0",
     "fzf@0.47.0",
-    "gomplate@3.11.7"
+    "gomplate@3.11.7",
+    "kind@0.24.0",
+    "stow@2.4.0"
   ],
   "shell": {
     "init_hook": [

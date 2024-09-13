@@ -34,6 +34,7 @@ tasks:
     platforms: [darwin]
     desc: "Stop and Delete All Local Lima VMs"
     cmds:
+    - limactl list -f json | jq -r 'select(.status == "Running") | .name' | xargs -I {} limactl stop --tty=false {}
     - limactl list -f json | jq -r 'select(.status == "Running") | .name' | xargs -I {} limactl stop --tty=false --force {}
     - limactl list -f json | jq -r 'select(.status == "Stopped") | .name' | xargs -I {} limactl delete --tty=false {}
     - limactl prune --tty=false 
@@ -44,7 +45,7 @@ tasks:
     platforms: [darwin]
     desc: "Creates Lima VM"
     cmds:
-      - limactl create --tty=false {{.LIMA_OS_TEMPLATE}}
+      - limactl create --tty=false --vm-type=qemu --arch=x86_64 {{.LIMA_OS_TEMPLATE}}
     status:
     - limactl list -f json {{.LIMA_OS}} | jq -r .name | grep -i {{.LIMA_OS}}
 
@@ -54,7 +55,7 @@ tasks:
     platforms: [darwin]
     desc: "Start Lima VM"
     cmds:
-      - limactl start --tty=false {{.LIMA_OS}}
+    - limactl start --tty=false --vm-type=qemu --arch=x86_64 {{.LIMA_OS}}
     status:
     - limactl list -f json {{.LIMA_OS}} | jq -r .status | grep -i running
 
@@ -64,7 +65,7 @@ tasks:
     platforms: [darwin]
     desc: "Shell into Lima VM"
     cmds:
-    - limactl shell {{.LIMA_OS}}
+    - limactl shell --tty=false {{.LIMA_OS}}
     interactive: true
 
   stop-vm:

@@ -1,0 +1,18 @@
+inputDir: tmpl/cluster
+outputMap: |
+  clusters/{{ .Env.K8S_CLUSTER_NAME }}/{{ .in | strings.ReplaceAll ".yaml.tmpl" ".yaml" }}
+
+plugins:
+  echo:
+    cmd: echo
+  htpasswd:
+    cmd: htpasswd
+    # args:
+    #   - -nbB
+    #   - admin
+
+# context:
+#   config: .{{ .Env.K8S_CLUSTER_NAME }}.env.yaml
+
+## this feature not available until 3.12 gomplate, which isn't available yet
+# missingKey: default

@@ -39,7 +39,7 @@ spec:
   gateways:
   - knative-serving/knative-ingress-gateway
   hosts:
-  - chat.wh-nkp2.cloudnative.nvdlab.net
+  - chat.cnai.irs-nai-nkp.cloudnative.nvdlab.net
   http:
   - match:
     - uri:

@@ -7,8 +7,6 @@ images:
 # Hint: run `limactl prune` to invalidate the cache
 - location: "https://dl.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud.latest.x86_64.qcow2"
   arch: "x86_64"
-- location: "https://dl.rockylinux.org/pub/rocky/9/images/aarch64/Rocky-9-GenericCloud.latest.aarch64.qcow2"
-  arch: "aarch64"
 
 mounts:
 - location: "~"
@@ -20,16 +18,20 @@ provision:
 - mode: system
   ## This script install go-task, a task runner, in the VM
   script: |
-    #!/usr/bin/bash
+    #!/usr/bin/env bash
     set -eux -o pipefail
     yum install -y make
 
 message: |
-  To begin, run `make install-linux-dependencies` to install bare min. requirements on the host.
-  To deploy workstation cli tools, easiest method is to leverage nix/devbox shell:
-  1. run `task workstation:install-devbox`
-  2. run `devbox shell`
+  To deploy workstation cli tools, easiest method is to leverage nix/devbox shell.
+  To do so, run the following commands:
   ------
-  run `eval $(task switch-shell-env)` to switch between environments.
+    make install-linux-dependencies
+    task workstation:bootstrap-jumpbox --yes
+    source ~/.bashrc
+    devbox shell
+
+  - Run `eval $(task switch-shell-env)` to switch between environments.
+  - If K8s cluster already exists, for example NKP, run `task nkp:get-cluster-kubeconfig --force`
   To see list of tasks, run `task --list` or `task --list-all`
   ------

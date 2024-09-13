@@ -1,0 +1,46 @@
+version: '3'
+
+vars:
+  TOFU_TARGET: '{{.TOFU_TARGET | default "jumphost-vm"}}'
+  TOFU_WORKING_DIR: '${PWD}/infra/tofu/{{.TOFU_TARGET}}'
+
+tasks:
+
+  default:
+  - task: :helpers:validate
+    vars:
+      REQUIRED_TOOLS_LIST: tofu
+
+  init:
+    silent: false
+    deps: [default]
+    desc: Initialize Tofu Workspace
+    cmds:
+    - cp ${PWD}/.env.{{.ENVIRONMENT}}.yaml ${PWD}/infra/tofu/{{.TOFU_TARGET}}/
+    - tofu -chdir={{.TOFU_WORKING_DIR}} init -upgrade
+    - tofu -chdir={{.TOFU_WORKING_DIR}} workspace select -or-create {{.ENVIRONMENT}}
+    - tofu -chdir={{.TOFU_WORKING_DIR}} validate
+    requires:
+      vars: [ENVIRONMENT]
+
+  plan:
+    silent: false
+    deps: [init]
+    desc: Plan Tofu Workspace
+    cmds:
+    - tofu -chdir={{.TOFU_WORKING_DIR}} plan
+
+  apply:
+    silent: false
+    deps: [plan]
+    desc: Apply Tofu Workspace
+    cmds:
+    - tofu -chdir={{.TOFU_WORKING_DIR}} apply -auto-approve
+    - tofu -chdir={{.TOFU_WORKING_DIR}} state list
+
+  destroy:
+    silent: false
+    desc: Destroy Tofu Workspace
+    dir: '{{.TOFU_WORKING_DIR}}'
+    cmds:
+    - tofu destroy -auto-approve

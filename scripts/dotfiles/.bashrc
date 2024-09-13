@@ -18,6 +18,9 @@ export LESS_TERMCAP_so=$'\E[38;5;246m'
 export LESS_TERMCAP_ue=$'\E[0m'
 export LESS_TERMCAP_us=$'\E[04;38;5;146m'
 
+
+source <(devbox shellenv)
+
 for files in ~/{.aliases,.functions,.kubectl_aliases,.vimrc}; do
   if [[ -r "$files" ]] && [[ -f "$files" ]]; then
     # shellcheck disable=SC1090

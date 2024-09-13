@@ -131,7 +131,6 @@ tasks:
     cmds:
     - sudo ${PWD}/bin/harbor/install.sh --with-trivy
 
-
   verify-installation:
     silent: false
     deps: [default]

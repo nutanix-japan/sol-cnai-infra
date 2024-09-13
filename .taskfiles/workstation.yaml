@@ -41,7 +41,6 @@ tasks:
       KREW_FILE:
         sh: cat {{.KREW_FILE}} | xargs | sed 's/ /,/g'
     cmds:
-    - '[ "$DEVBOX_SHELL_ENABLED" == "1" ] || devbox shell -q'
     - for: {var: KREW_FILE, split: ',', as: KREW_FILE}
       cmd: 'krew update && krew install {{ .KREW_FILE }}'
 
@@ -70,25 +69,33 @@ tasks:
     silent: false
     prompt: This will install Devbox on local machine...Would you like to proceed?
     dir: '{{.USER_WORKING_DIR}}'
-    platforms: [linux]
+    platforms: [darwin,linux]
     desc: Installs nix and devbox interactively based on USER_ROLE.
     cmds: 
     - curl -fsSL https://get.jetify.com/devbox | FORCE=1 bash
     - curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install --no-confirm
-    - devbox shell -q
+    - cp ./devbox.{json,lock} $HOME/
+    - devbox install --tidy-lockfile --quiet --config $HOME/devbox.json
     status:
     - '[ "$DEVBOX_SHELL_ENABLED" == "1" ]'
-
-  install-dkp:
-    prompt: This will install dkp cli on local machine...Would you like to proceed?
-    deps: [install-docker]
+  
+  install-nkp-cli:
+    prompt: This will install nkp cli on local machine...Would you like to proceed?
     silent: true
-    platforms: [darwin, linux]
+    platforms: [linux]
     dir: '{{.USER_WORKING_DIR}}'
     desc: Installs Nutanix DKP cli tool
     cmds:
-    - ./scripts/common/install_linux_dkp.sh
-    interactive: true
+    - tar zxvf ${PWD}/bin/nkp_v2.12.0_linux_amd64.tar.gz -C ${PWD}/bin
+    - sudo mv ${PWD}/bin/nkp /usr/local/bin
+    - chmod +x /usr/local/bin/nkp
+    - nkp version
+    - rm -f nkp.tar.gz NOTICES
+    preconditions:
+    - sh: ls -l ${PWD}/bin/nkp_v2.12.0_linux_amd64.tar.gz
+      msg: "${PWD}/bin/nkp_v2.12.0_linux_amd64.tar.gz not found. Please download the file and try again."
+    status:
+    - command -v nkp
 
   install-docker:
     silent: false
@@ -107,9 +114,10 @@ tasks:
     - |
       {{if eq OS "linux"}}
         task workstation:install-linux-packages --yes
+        task workstation:install-docker --yes
+        task workstation:install-nkp-cli --yes
+        task workstation:load-dotfiles --yes
         task workstation:install-devbox --yes
         task workstation:krew USER_ROLE=devops-role --yes
-        task workstation:install-docker --yes
-        task workstation:load-dotfiles --yes
       {{end}}
 

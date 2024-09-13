@@ -14,7 +14,6 @@ provisioner: csi.nutanix.com
 parameters:
   dynamicProv: ENABLED
   nfsServerName: files
-  nfsServer: files.odin.cloudnative.nvdlab.net
   csi.storage.k8s.io/provisioner-secret-name: nutanix-csi-credentials-files
   csi.storage.k8s.io/provisioner-secret-namespace: ntnx-system
   csi.storage.k8s.io/node-publish-secret-name: nutanix-csi-credentials-files
@@ -22,7 +21,6 @@ parameters:
   csi.storage.k8s.io/controller-expand-secret-name: nutanix-csi-credentials-files
   csi.storage.k8s.io/controller-expand-secret-namespace: ntnx-system
   storageType: NutanixFiles
-  description: iep-dev$(date +%d%m%y)
 allowVolumeExpansion: true
 EOF
 

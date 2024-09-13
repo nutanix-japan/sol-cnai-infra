@@ -19,9 +19,6 @@ fi
 ## https://docs.docker.com/engine/install/linux-postinstall/
 sudo groupadd docker -f
 sudo usermod -aG docker $USER
-newgrp docker
-
-docker version
 
 ## Configure Docker to start on boot with systemd
 sudo systemctl enable --now docker.service

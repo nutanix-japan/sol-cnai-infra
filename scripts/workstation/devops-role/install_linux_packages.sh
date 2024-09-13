@@ -16,7 +16,8 @@ if grep -q -i ubuntu /etc/os-release; then
     fzf \
     tmux \
     zstd \
-    apache2-utils
+    apache2-utils \
+    xdg-utils
 fi
 
 ## install common packages for Rocky Linux
@@ -30,5 +31,6 @@ if grep -q -i rocky /etc/os-release; then
     python3 \
     tmux \
     zstd \
-    httpd-tools
+    httpd-tools \
+    xdg-utils
 fi

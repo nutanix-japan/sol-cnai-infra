@@ -10,7 +10,7 @@ helm upgrade --install istiod istiod --repo https://istio-release.storage.google
     --set gateways.securityContext.runAsGroup=0 
 helm upgrade --install istio-ingressgateway gateway --repo https://istio-release.storage.googleapis.com/charts --version=1.20.8 -n istio-system \
     --set securityContext.runAsUser=0 --set securityContext.runAsGroup=0 \
-    --set containerSecurityContext.runAsUser=0 --set containerSecurityContext.runAsGroup=0
+    --set containerSecurityContext.runAsUser=0 --set containerSecurityContext.runAsGroup=0 --wait
 
 ## Deploy Knative 1.13.1 
 helm upgrade --install knative-serving-crds nai-knative-serving-crds --repo https://nutanix.github.io/helm-releases  --version=1.13.1 -n knative-serving --create-namespace --wait

@@ -12,6 +12,9 @@ includes:
   nai: ./.taskfiles/nai.yaml
   aws: ./.taskfiles/aws.yaml
   harbor: ./.taskfiles/harbor.yaml
+  tofu: 
+    taskfile: ./.taskfiles/tofu.yaml
+    aliases: [tf]
   limactl:
     taskfile: ./.taskfiles/limactl.yaml
     aliases: [lima]
@@ -52,7 +55,7 @@ tasks:
       This task will deploy NKP and NAI
     cmds:
       - task nkp:deploy-nkp-full
-      - task nai:nai-deploy
+      - task nai:deploy-nai
     requires:
       vars: [ENVIRONMENT]
 
@@ -68,7 +71,7 @@ tasks:
       CLUSTER_NAME:
         sh: 'source {{.ENV_CONFIG_FILE}} && echo $CLUSTER_NAME'
     cmds:
-    - echo "export KUBECONFIG=${HOME}/.kube/{{.ENVIRONMENT}}.cfg"
+    - echo "export KUBECONFIG=${PWD}/{{.ENVIRONMENT}}.cfg"
     - echo "export ENVIRONMENT={{.ENVIRONMENT}}"
     - echo "export CLUSTER_NAME={{.CLUSTER_NAME}}"
     preconditions:

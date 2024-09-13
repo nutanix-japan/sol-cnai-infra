@@ -1,3 +1,6 @@
+# ignore markdown with notes
+notes.md
+
 # ignore anything under configs that's not templates
 .config.env
 configs/**
