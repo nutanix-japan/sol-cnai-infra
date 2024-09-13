@@ -15,61 +15,98 @@
 5. Post Install Tasks (Manual)
    1. Navigate to Kommander Dashboard and Enable GPU Operator (driver: enabled: true)
 
-## New Cluster Walkthrough on HPOC
+## Dragon KABOOM (E2E) - New Cluster Walkthrough on Dragon
 
 ```bash
-## set environment sourcefile
+export ENVIRONMENT=dragon-nai-nkp-len
 eval $(task switch-shell-env)
 
-## create ubuntu image if new cluster.  - 15 min
+## create DNS Host record - 1 min
+task aws:create-route53-record DNS_RECORD_NAME=*.nkp.${CLUSTER_NAME}.dragon.cloudnative.nvdlab.net DNS_RECORD_IP=10.124.62.136
+task aws:create-route53-record DNS_RECORD_NAME=*.cnai.${CLUSTER_NAME}.dragon.cloudnative.nvdlab.net DNS_RECORD_IP=10.124.62.137
+task aws:create-route53-record DNS_RECORD_NAME=*.nginx.${CLUSTER_NAME}.dragon.cloudnative.nvdlab.net DNS_RECORD_IP=10.124.62.138
+
+## create Certs with wildcard and record_name - 5 min
+task aws:create-acme-sh-certs DNS_RECORD_NAME=nkp.${CLUSTER_NAME}.dragon.cloudnative.nvdlab.net
+task aws:create-acme-sh-certs DNS_RECORD_NAME=cnai.${CLUSTER_NAME}.dragon.cloudnative.nvdlab.net
+task aws:create-acme-sh-certs DNS_RECORD_NAME=nginx.${CLUSTER_NAME}.dragon.cloudnative.nvdlab.net
+
+## Deploy NKP and NAI End-to-End, No Coffee Breaks...Good Luck!
+task deploy-nkai-kaos
+```
+
+## Romanticism KABOOM (E2E) - New Cluster Walkthrough on Dragon
+
+export ENVIRONMENT=romanticism
+task aws:create-route53-record DNS_RECORD_NAME=*.vllm-nkp-nai.romanticism.cloudnative.nvdlab.net DNS_RECORD_IP=10.124.62.136
+task aws:create-acme-sh-certs DNS_RECORD_NAME=vllm-nkp-nai.romanticism.cloudnative.nvdlab.net
+task aws:create-route53-record DNS_RECORD_NAME=*.istio.vllm-nkp-nai.romanticism.cloudnative.nvdlab.net DNS_RECORD_IP=10.124.62.137
+task aws:create-acme-sh-certs DNS_RECORD_NAME=istio.vllm-nkp-nai.romanticism.cloudnative.nvdlab.net
+
+task kaboom
+
+## Odin KABOOM (E2E) - New Cluster Walkthrough on Odin
+
+```bash
+## set environment
+source .env-odin-nai-nkp-mgx
+
+## create ubuntu image if new cluster - 15 min
 task nkp:create-nutanix-ubuntu-2204-image
 
-### MANUAL update .env with ubuntu image name
+## create DNS Host record for Objects and Files
+task aws:create-route53-record DNS_RECORD_NAME=objects.odin.cloudnative.nvdlab.net DNS_RECORD_IP=10.28.174.147
+task aws:create-route53-record DNS_RECORD_NAME=objects.odin.cloudnative.nvdlab.net DNS_RECORD_IP=10.28.174.148
+task aws:create-route53-record DNS_RECORD_NAME=objects.odin.cloudnative.nvdlab.net DNS_RECORD_IP=10.28.174.149
+task aws:create-acme-sh-certs DNS_RECORD_NAME=objects.odin.cloudnative.nvdlab.net
 
-## create prism central route53 records and certs
-task aws:create-route53-record DNS_RECORD_NAME=prism.dm3-ai02.cloudnative.nvdlab.net DNS_RECORD_IP=10.54.111.39
-task aws:create-acme-sh-certs DNS_RECORD_NAME=prism.dm3-ai02.cloudnative.nvdlab.net
+task aws:create-route53-record DNS_RECORD_NAME=files.odin.cloudnative.nvdlab.net DNS_RECORD_IP=10.28.174.151
+task aws:create-route53-record DNS_RECORD_NAME=files.odin.cloudnative.nvdlab.net DNS_RECORD_IP=10.28.174.152
+task aws:create-route53-record DNS_RECORD_NAME=files.odin.cloudnative.nvdlab.net DNS_RECORD_IP=10.28.174.153
 
-## create objects route53 records and certs
-task aws:create-route53-record DNS_RECORD_NAME=objects.dm3-ai02.cloudnative.nvdlab.net DNS_RECORD_IP=10.54.111.18
-task aws:create-route53-record DNS_RECORD_NAME=objects.dm3-ai02.cloudnative.nvdlab.net DNS_RECORD_IP=10.54.111.19
-task aws:create-route53-record DNS_RECORD_NAME=objects.dm3-ai02.cloudnative.nvdlab.net DNS_RECORD_IP=10.54.111.20
-task aws:create-acme-sh-certs DNS_RECORD_NAME=objects.dm3-ai02.cloudnative.nvdlab.net
 
-## create files route53 records
-task aws:create-route53-record DNS_RECORD_NAME=files.dm3-ai02.cloudnative.nvdlab.net DNS_RECORD_IP=10.54.111.61
-task aws:create-route53-record DNS_RECORD_NAME=files.dm3-ai02.cloudnative.nvdlab.net DNS_RECORD_IP=10.54.111.62
-task aws:create-route53-record DNS_RECORD_NAME=files.dm3-ai02.cloudnative.nvdlab.net DNS_RECORD_IP=10.54.111.63
+## set environment
+source .env-odin-nai-nkp-mgx
 
-## create nkp kommander cluster route53 records and certs for traefik use cases
-task aws:create-route53-record DNS_RECORD_NAME=*.nkp.${CLUSTER_NAME}.cloudnative.nvdlab.net DNS_RECORD_IP=10.54.111.51
-task aws:create-route53-record DNS_RECORD_NAME=nkp.${CLUSTER_NAME}.cloudnative.nvdlab.net DNS_RECORD_IP=10.54.111.51
-task aws:create-acme-sh-certs DNS_RECORD_NAME=nkp.${CLUSTER_NAME}.cloudnative.nvdlab.net
+## create DNS Host record - 1 min
+task aws:create-route53-record DNS_RECORD_NAME=*.nkp.${CLUSTER_NAME}.odin.cloudnative.nvdlab.net DNS_RECORD_IP=10.28.174.211
+task aws:create-route53-record DNS_RECORD_NAME=*.cnai.${CLUSTER_NAME}.odin.cloudnative.nvdlab.net DNS_RECORD_IP=10.28.174.212
+task aws:create-route53-record DNS_RECORD_NAME=*.nginx.${CLUSTER_NAME}.odin.cloudnative.nvdlab.net DNS_RECORD_IP=10.28.174.213
 
-## create istio wildcard dns records for nai
-task aws:create-route53-record DNS_RECORD_NAME=*.cnai.${CLUSTER_NAME}.cloudnative.nvdlab.net DNS_RECORD_IP=10.54.111.52
-task aws:create-route53-record DNS_RECORD_NAME=cnai.${CLUSTER_NAME}.cloudnative.nvdlab.net DNS_RECORD_IP=10.54.111.52
-task aws:create-acme-sh-certs DNS_RECORD_NAME=cnai.${CLUSTER_NAME}.cloudnative.nvdlab.net
+## create Certs with wildcard and record_name - 5 min
+task aws:create-acme-sh-certs DNS_RECORD_NAME=nkp.${CLUSTER_NAME}.odin.cloudnative.nvdlab.net
+task aws:create-acme-sh-certs DNS_RECORD_NAME=cnai.${CLUSTER_NAME}.odin.cloudnative.nvdlab.net
+task aws:create-acme-sh-certs DNS_RECORD_NAME=nginx.${CLUSTER_NAME}.odin.cloudnative.nvdlab.net
 
-## create nginx wildcard dns records for other use cases like harbor
-task aws:create-route53-record DNS_RECORD_NAME=*.${CLUSTER_NAME}.cloudnative.nvdlab.net DNS_RECORD_IP=10.54.111.53
-task aws:create-route53-record DNS_RECORD_NAME=${CLUSTER_NAME}.cloudnative.nvdlab.net DNS_RECORD_IP=10.54.111.53
-task aws:create-acme-sh-certs DNS_RECORD_NAME=${CLUSTER_NAME}.cloudnative.nvdlab.net
- 
 ## Deploy NKP and NAI End-to-End, No Coffee Breaks...Good Luck!
 task deploy-nkai-kaos
 
-## IRS NAI ENVIRONMENT DETAILS
-
-NKP Dashboard URL: https://10.54.111.51/dkp/kommander/dashboard
-Username: laughing_kalam
-Password: Bo9K792f6ZcMfhYBKxUJGSpzukjTa1QoxgFefo5ccYeL1XHolWINap9ElmvZke4Z
-
-NAI Dashboard URL: https://nai.cnai.irs-nai-nkp.cloudnative.nvdlab.net
-Chat Application UR: https://chat.cnai.irs-nai-nkp.cloudnative.nvdlab.net/
-
-admin-api-key: c1f59ff4-65af-4176-aff6-2e21700584dd
+```
 
 
+## Datarobot New Cluster Walkthrough on HPOC
+
+```bash
+
+export ENVIRONMENT=datarobot-nkp-lab
+
+## set environment sourcefile
+eval $(task switch-shell-env)
+
+## create ubuntu image if new cluster - 15 min
+task nkp:create-nutanix-ubuntu-2204-image
+
+## create DNS Host record - 1 min
+task aws:create-route53-record DNS_RECORD_NAME=*.nkp.${CLUSTER_NAME}.cloudnative.nvdlab.net DNS_RECORD_IP=10.38.20.141
+task aws:create-route53-record DNS_RECORD_NAME=*.cnai.${CLUSTER_NAME}.cloudnative.nvdlab.net DNS_RECORD_IP=10.38.20.142
+task aws:create-route53-record DNS_RECORD_NAME=*.dr.${CLUSTER_NAME}.cloudnative.nvdlab.net DNS_RECORD_IP=10.38.20.143
+
+## create Certs with wildcard and record_name - 5 min
+task aws:create-acme-sh-certs DNS_RECORD_NAME=nkp.${CLUSTER_NAME}.cloudnative.nvdlab.net
+task aws:create-acme-sh-certs DNS_RECORD_NAME=cnai.${CLUSTER_NAME}.cloudnative.nvdlab.net
+task aws:create-acme-sh-certs DNS_RECORD_NAME=dr.${CLUSTER_NAME}.cloudnative.nvdlab.net
+
+## Deploy NKP and NAI End-to-End, No Coffee Breaks...Good Luck!
+task deploy-nkai-kaos
 
 ```
