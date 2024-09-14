@@ -29,26 +29,21 @@ tasks:
 
   install-hf-cli:
     silent: false
-    desc: Install Huggingface CLI
+    platforms: [linux]
+    desc: Install HuggingFace Hub Cli. Requires pip
     cmds:
     - pip install -q huggingface-cli
+    preconditions:
+    - sh: command -v pip
+      msg: "Pip not found. Please install pip before running this task."
     status:
     - command -v huggingface-cli
-
-  login:
-    silent: false
-    deps: [default]
-    desc: Login to Huggingface via CLI
-    cmds:
-    - huggingface-cli login --token {{.HUGGINGFACE_TOKEN}}
-    requires:
-      vars: [HUGGINGFACE_TOKEN]
 
   mount-nfs-share:
     silent: false
     deps: [default]
     platforms: [linux]
-    desc: Mount NFS Share
+    desc: Mounts Nutanix Files NFS Export to MODEL_DIR. Default MODEL_DIR=/mnt/NFS_SERVER/NFS_SHARE.
     cmds:
     - test -d {{.MODEL_DIR}} || sudo mkdir -p {{.MODEL_DIR}}
     - sudo mount -t nfs -w -v {{.NFS_SERVER}}:/{{.NFS_SHARE}} {{.MODEL_DIR}}
@@ -63,7 +58,8 @@ tasks:
   download-model:
     silent: false
     deps: [mount-nfs-share, install-hf-cli]
-    desc: Download Huggingface Model via CLI
+    platforms: [linux]
+    desc: Download Huggingface Model via cli. Override ex. `task hf:download-model MODEL_NAME=meta-llama/Meta-Llama-3.1-70B-Instruct`
     cmds:
     - test -d {{.MODEL_DIR}} || sudo mkdir -p {{.MODEL_DIR}}/{{.MODEL_NAME}}
     - |
@@ -77,7 +73,7 @@ tasks:
     - sh: mount | grep {{.MODEL_DIR}}
       msg: "NFS Share ({{.MODEL_DIR}}) not mounted"
     requires:
-      vars: [HUGGINGFACE_TOKEN]
+      vars: [HUGGINGFACE_TOKEN, MODEL_NAME, MODEL_DIR]
 
 
 
