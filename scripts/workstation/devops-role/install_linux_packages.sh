@@ -12,12 +12,14 @@ if grep -q -i ubuntu /etc/os-release; then
     vim \
     bash-completion \
     python3 \
+    python3-pip \
     shellcheck \
     fzf \
     tmux \
     zstd \
     apache2-utils \
-    xdg-utils
+    xdg-utils \
+    nfs-common
 fi
 
 ## install common packages for Rocky Linux
@@ -29,8 +31,10 @@ if grep -q -i rocky /etc/os-release; then
     vim \
     bash-completion \
     python3 \
+    python3-pip \
     tmux \
     zstd \
     httpd-tools \
-    xdg-utils
+    xdg-utils \
+    nfs-common
 fi

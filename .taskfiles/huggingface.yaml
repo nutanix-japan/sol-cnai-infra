@@ -1,0 +1,67 @@
+version: '3'
+
+tasks:
+
+  default:
+    silent: true
+    internal: false
+    cmds:
+    - task: :helpers:validate
+      vars:
+        REQUIRED_TOOLS_LIST: huggingface-cli showmount nfs
+    - task: :helpers:print-current-context
+    requires:
+      vars: [ENVIRONMENT]
+
+  login:
+    silent: false
+    deps: [default]
+    desc: Login to Huggingface via CLI
+    cmds:
+    - huggingface-cli login --token {{.HUGGINGFACE_TOKEN}}
+    requires:
+      vars: [HUGGINGFACE_TOKEN]
+
+  mount-nfs-share:
+    silent: false
+    deps: [default]
+    #platforms: [linux]
+    desc: Mount NFS Share
+    vars:
+      NFS_SERVER: 'files.odin.cloudnative.nvdlab.net'
+      NFS_SHARE: 'llm-model-store'
+      #LOCAL_MOUNT_DIR: '/mnt/{{.NFS_SERVER}}/{{.NFS_SHARE}}'
+      LOCAL_MOUNT_DIR: '/private/{{.NFS_SERVER}}/{{.NFS_SHARE}}'
+    cmds:
+    - test -d {{.LOCAL_MOUNT_DIR}} || sudo mkdir -p {{.LOCAL_MOUNT_DIR}}
+    - sudo mount -t nfs -w -v {{.NFS_SERVER}}:/{{.NFS_SHARE}} {{.LOCAL_MOUNT_DIR}}
+    precondition:
+    - sh: showmount -e {{.NFS_SERVER}} | awk '{print $1}' | grep -i llm-model-store
+      msg: "NFS Share ({{.NFS_SHARE}}) not found on NFS Server ({{.NFS_SERVER}})"
+    # requires:
+    #   vars: [NFS_SERVER, NFS_SHARE, LOCAL_MOUNT_DIR]
+
+  download-model:
+    silent: false
+    deps: [default]
+    desc: Download Huggingface Model via CLI
+    vars:
+      #MODEL_NAME: 'meta-llama/Meta-Llama-3.1-70B-Instruct'
+      MODEL_DIR: '/private/files.odin.cloudnative.nvdlab.net/llm-model-store'
+      MODEL_NAME: 'meta-llama/Meta-Llama-3-8B'
+      MODEL_REVISION: 'main'
+    cmds:
+    - test -d {{.MODEL_DIR}} || sudo mkdir -p {{.MODEL_DIR}}/{{.MODEL_NAME}}
+    - |
+      export HF_HUB_CACHE={{.MODEL_DIR}} && \
+      huggingface-cli env && \
+      huggingface-cli download {{.MODEL_NAME}} \
+        --cache-dir {{.MODEL_DIR}} \
+        --local-dir {{.MODEL_DIR}}/{{.MODEL_NAME}} \
+        --token {{.HUGGINGFACE_TOKEN}} \
+        --exclude "original/*"
+    requires:
+      vars: [HUGGINGFACE_TOKEN]
+
+
+

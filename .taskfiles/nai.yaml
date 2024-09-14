@@ -70,8 +70,15 @@ tasks:
     desc: "Deploy Istio 1.20.8"
     cmds:
       - helm upgrade --install istio-base base --repo https://istio-release.storage.googleapis.com/charts --version=1.20.8 -n istio-system --create-namespace --wait
-      - helm upgrade --install istiod istiod --repo https://istio-release.storage.googleapis.com/charts --version=1.20.8 -n istio-system --wait --set gateways.securityContext.runAsUser=0 --set gateways.securityContext.runAsGroup=0
+      - helm upgrade --install istiod istiod --repo https://istio-release.storage.googleapis.com/charts --version=1.20.8 -n istio-system --set gateways.securityContext.runAsUser=0 --set gateways.securityContext.runAsGroup=0 --wait
       - helm upgrade --install istio-ingressgateway gateway --repo https://istio-release.storage.googleapis.com/charts --version=1.20.8 -n istio-system --set securityContext.runAsUser=0 --set securityContext.runAsGroup=0 --set containerSecurityContext.runAsUser=0 --set containerSecurityContext.runAsGroup=0
+    preconditions:
+    - sh: kubectl get nodes -o name --kubeconfig ${PWD}/${ENVIRONMENT}.cfg
+      msg: "Failed to run kubectl get nodes. Please ensure you have a valid kubeconfig file in ${PWD}/${ENVIRONMENT}.cfg"
+    status:
+    - helm status istio-base -n istio-system -o json | jq -r .info.status | grep -q deployed
+    - helm status istiod -n istio-system -o json | jq -r .info.status | grep -q deployed
+    - helm status istio-ingressgateway -n istio-system -o json | jq -r .info.status | grep -q deployed
 
   deploy-knative:
     silent: false
@@ -83,6 +90,15 @@ tasks:
       - helm upgrade --install knative-istio-controller nai-knative-istio-controller --repo https://nutanix.github.io/helm-releases -n knative-serving --version=1.13.1 --wait
       - kubectl patch configmap config-features -n knative-serving --patch '{"data":{"kubernetes.podspec-nodeselector":"enabled"}}'
       - kubectl patch configmap config-autoscaler -n knative-serving --patch '{"data":{"enable-scale-to-zero":"false"}}'
+    preconditions:
+    - sh: kubectl get nodes -o name --kubeconfig ${PWD}/${ENVIRONMENT}.cfg
+      msg: "Failed to run kubectl get nodes. Please ensure you have a valid kubeconfig file in ${PWD}/${ENVIRONMENT}.cfg"
+    status:
+      - helm status knative-serving-crds -n knative-serving -o json | jq -r .info.status | grep -q deployed
+      - helm status knative-serving -n knative-serving -o json | jq -r .info.status | grep -q deployed
+      - helm status knative-istio-controller -n knative-serving -o json | jq -r .info.status | grep -q deployed
+      - kubectl get configmap config-features -n knative-serving -o json | jq -e '.data."kubernetes.podspec-nodeselector" == "enabled"'
+      - kubectl get configmap config-autoscaler -n knative-serving -o json | jq -e '.data."enable-scale-to-zero" == "false"'
 
   deploy-kserve:
     silent: false
@@ -91,8 +107,14 @@ tasks:
     cmds:
       - helm upgrade --install kserve-crd oci://ghcr.io/kserve/charts/kserve-crd --version=v0.13.1 -n kserve --create-namespace --wait
       - helm upgrade --install kserve oci://ghcr.io/kserve/charts/kserve --version=v0.13.1 -n kserve --wait --set kserve.modelmesh.enabled=false --set kserve.controller.image=docker.io/nutanix/nai-kserve-controller --set kserve.controller.tag=v0.13.1
+    preconditions:
+    - sh: kubectl get nodes -o name --kubeconfig ${PWD}/${ENVIRONMENT}.cfg
+      msg: "Failed to run kubectl get nodes. Please ensure you have a valid kubeconfig file in ${PWD}/${ENVIRONMENT}.cfg"
+    status:
+    - helm status kserve-crd -n kserve -o json | jq -r .info.status | grep -q deployed
+    - helm status kserve -n kserve -o json | jq -r .info.status | grep -q deployed
 
-  prepare-nai:
+  deploy-dependencies:
     silent: false
     deps: [default]
     desc: "Deploy Istio, Knative, and Kserve"
