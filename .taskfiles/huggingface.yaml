@@ -57,7 +57,7 @@ tasks:
     requires:
       vars: [NFS_SERVER, NFS_SHARE, MODEL_DIR]
     status:
-    - mount | grep {{.NFS_SERVER}}
+    - mount | grep {{.MODEL_DIR}}
 
   download-model:
     silent: false
@@ -72,6 +72,9 @@ tasks:
         --local-dir {{.MODEL_DIR}}/{{.MODEL_NAME}} \
         --token {{.HUGGINGFACE_TOKEN}} \
         --exclude "original/*"
+    precondition:
+    - sh: mount | grep {{.MODEL_DIR}}
+      msg: "NFS Share ({{.MODEL_DIR}}) not mounted"
     requires:
       vars: [HUGGINGFACE_TOKEN]
 
