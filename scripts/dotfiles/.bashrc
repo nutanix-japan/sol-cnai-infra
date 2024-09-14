@@ -46,7 +46,6 @@ source <(eksctl completion bash)
 source <(kubectl completion bash)
 source <(stern --completion=bash)
 source <(helm completion bash)
-source <(fzf --bash)
 
 alias k='kubectl'
 complete -F __start_kubectl k
