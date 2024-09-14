@@ -21,10 +21,5 @@
     "gomplate@3.11.7",
     "kind@0.24.0",
     "stow@2.4.0"
-  ],
-  "shell": {
-    "init_hook": [
-      "task --summary"
-    ]
-  }
+  ]
 }

@@ -32,6 +32,8 @@ tasks:
     - '[ -n "$(command -v arkade)" ] || (curl -sLS https://get.arkade.dev | sudo sh)'
     - for: {var: ARKADE_PACKAGES, split: ',', as: ARKADE_PACKAGE}
       cmd: 'arkade get {{ .ARKADE_PACKAGE }} && sudo cp -a ${HOME}/.arkade/bin/{{ .ARKADE_PACKAGE }} /usr/local/bin/'
+    status:
+    - command -v arkade
 
   krew:
     prompt: This will install Krew and dependent kubectl plugins... Do you wish to continue?
@@ -40,10 +42,12 @@ tasks:
     vars:
       KREW_FILE:
         sh: cat {{.KREW_FILE}} | xargs | sed 's/ /,/g'
+    preconditions:
+      - sh: 'command -v krew'
+        msg: 'krew is not installed or not in PATH. Please install krew and try again.'
     cmds:
-    - '[ "$DEVBOX_SHELL_ENABLED" == "1" ] || devbox shell -q'
     - for: {var: KREW_FILE, split: ',', as: KREW_FILE}
-      cmd: 'krew update && krew install {{ .KREW_FILE }}'
+      cmd: 'export PATH="${KREW_ROOT:-$HOME/.krew}/bin:$PATH" && krew update && krew install {{ .KREW_FILE }}'
 
   install-linux-packages:
     platforms: [linux]
@@ -78,7 +82,8 @@ tasks:
     - cp ./devbox.{json,lock} $HOME/
     - devbox install --tidy-lockfile --quiet --config $HOME/devbox.json
     status:
-    - '[ "$DEVBOX_SHELL_ENABLED" == "1" ]'
+    - command -v devbox
+    - systemctl status nix-daemon | grep -q active
   
   install-nkp-cli:
     prompt: This will install nkp cli on local machine...Would you like to proceed?

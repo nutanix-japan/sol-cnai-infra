@@ -2,6 +2,25 @@
 
 ## New Cluster Walkthrough on HPOC
 
+### Install Utils on New Bastion Host
+
+```bash
+## git clone && cd into dir
+git clone https://github.com/jesse-gonzalez/sol-cnai-infra.git && cd sol-cnai-infra/
+
+## install go-task
+sudo sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
+
+## download nkp binaries to bin directory
+
+
+## bootstrap jumpbox to install linux depends, nkp, utils, etc.
+task workstation:bootstrap-jumpbox --yes
+
+## enter devbox shell
+devbox shell
+```
+
 ### Set Environment Variables
 
 ```bash
