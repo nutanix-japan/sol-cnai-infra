@@ -2,11 +2,18 @@ version: '3'
 
 env:
   NFS_SERVER: ${NFS_SERVER_FQDN}
+  MODEL_NAME: '{{ default "meta-llama/Meta-Llama-3-8B" .MODEL_NAME}}'
   NFS_SHARE: '{{ default "llm-model-store" .NFS_SHARE}}'
-  MODEL_DIR: '{{ default "/mnt/{{.NFS_SERVER}}/{{.NFS_SHARE}}" .MODEL_DIR}}'
-  MODEL_NAME: '{{ default "meta-llama/Meta-Llama-3-8B" .MODEL_DIR}}'
+  MODEL_DIR: '/mnt/{{.NFS_SERVER}}/{{.NFS_SHARE}}'
 
 tasks:
+
+  print-vars:
+    cmds:
+      - 'echo "NFS_SERVER: {{.NFS_SERVER}}"'
+      - 'echo "NFS_SHARE: {{.NFS_SHARE}}"'
+      - 'echo "MODEL_DIR: {{.MODEL_DIR}}"'
+      - 'echo "MODEL_NAME: {{.MODEL_NAME}}"'
 
   default:
     silent: true
