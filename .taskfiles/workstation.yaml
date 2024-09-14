@@ -41,6 +41,7 @@ tasks:
       KREW_FILE:
         sh: cat {{.KREW_FILE}} | xargs | sed 's/ /,/g'
     cmds:
+    - '[ "$DEVBOX_SHELL_ENABLED" == "1" ] || devbox shell -q'
     - for: {var: KREW_FILE, split: ',', as: KREW_FILE}
       cmd: 'krew update && krew install {{ .KREW_FILE }}'
 
