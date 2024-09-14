@@ -9,6 +9,7 @@ env:
 tasks:
 
   print-vars:
+    silent: false
     cmds:
       - 'echo "NFS_SERVER: {{.NFS_SERVER}}"'
       - 'echo "NFS_SHARE: {{.NFS_SHARE}}"'
@@ -21,7 +22,7 @@ tasks:
     cmds:
     - task: :helpers:validate
       vars:
-        REQUIRED_TOOLS_LIST: huggingface-cli showmount nfs
+        REQUIRED_TOOLS_LIST: huggingface-cli showmount mount
     - task: :helpers:print-current-context
     requires:
       vars: [ENVIRONMENT]
