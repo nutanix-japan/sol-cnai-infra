@@ -86,13 +86,13 @@ tasks:
 
   taint-gpu-nodes:
     silent: false
-    desc: Taints GPU Nodes with nvidia.com/gpu.present=true:NoSchedule Taint. Override ex. `task kubectl:taint_gpu_nodes -- ray.io/node-type=worker:NoSchedule`
+    desc: Taints GPU Nodes with nvidia.com/gpu.present=true:NoSchedule. Override ex. `task k:taint_gpu_nodes -- ray.io/node-type=worker:NoSchedule`
     cmds:
     - kubectl taint node -l nvidia.com/gpu.present=true {{.CLI_ARGS | default "nvidia.com/gpu.present=true:NoSchedule"}}
 
   untaint-gpu-nodes:
     silent: false
-    desc: Removes Taints on GPU Nodes (i.e., nvidia.com/gpu.present=true label) with existing dedicated=gpu:NoSchedule Taint. Override ex. `task kubectl:untaint_gpu_nodes -- ray.io/node-type=worker:NoSchedule`
+    desc: Removes Taints on GPU Nodes with existing dedicated=gpu:NoSchedule. Override ex. `task k:untaint_gpu_nodes -- ray.io/node-type=worker:NoSchedule`
     cmds:
     - kubectl taint node -l nvidia.com/gpu.present=true {{.CLI_ARGS | default "nvidia.com/gpu.present=true:NoSchedule-"}}
 
