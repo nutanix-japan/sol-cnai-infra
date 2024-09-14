@@ -10,7 +10,9 @@ includes:
   flux: ./.taskfiles/flux.yaml
   nkp: ./.taskfiles/nkp.yaml
   nai: ./.taskfiles/nai.yaml
-  aws: ./.taskfiles/aws.yaml
+  aws: 
+    taskfile: ./.taskfiles/aws.yaml
+    aliases: [eks]
   harbor: ./.taskfiles/harbor.yaml
   tofu: 
     taskfile: ./.taskfiles/tofu.yaml

@@ -19,7 +19,7 @@ export LESS_TERMCAP_ue=$'\E[0m'
 export LESS_TERMCAP_us=$'\E[04;38;5;146m'
 
 
-source <(devbox shellenv)
+[ -f ~/.devbox.json ] && source <(devbox shellenv)
 
 for files in ~/{.aliases,.functions,.kubectl_aliases,.vimrc}; do
   if [[ -r "$files" ]] && [[ -f "$files" ]]; then
@@ -28,7 +28,7 @@ for files in ~/{.aliases,.functions,.kubectl_aliases,.vimrc}; do
   fi
 done
 
-##source /etc/profile.d/bash_completion.sh
+source /etc/profile.d/bash_completion.sh
 
 [ -f ~/.fzf.bash ] && source ~/.fzf.bash
 
@@ -37,14 +37,17 @@ export PATH="${KREW_ROOT:-$HOME/.krew}/bin:$PATH"
 set -o vi
 alias vi="vim"
 alias reload="source ~/.bashrc"
-##source /etc/profile.d/bash_completion.sh
 
-# Source bash-completion if installed via Homebrew
-#if [ -f $(brew --prefix)/etc/bash_completion ]; then
-#    . $(brew --prefix)/etc/bash_completion
-#fi
 source <(devbox completion bash)
+source <(task --completion bash)
 source <(kubectl completion bash)
+source <(arkade completion bash)
+source <(eksctl completion bash)
+source <(kubectl completion bash)
+source <(stern --completion=bash)
+source <(helm completion bash)
+source <(fzf --bash)
+
 alias k='kubectl'
 complete -F __start_kubectl k
 export do='--dry-run=client -o yaml'
@@ -65,7 +68,7 @@ fi
 
 set_terminal_title $ENVIRONMENT
 
-export PATH=/usr/local/bin:/usr/local/sbin:$PATH
+export PATH=/.local/bin:/usr/local/bin:/usr/local/sbin:$PATH
 
 ## add arkade bin
 export PATH=$PATH:$HOME/.arkade/bin/

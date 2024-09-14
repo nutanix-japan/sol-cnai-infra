@@ -32,22 +32,21 @@ tasks:
     - '[ -n "$(command -v arkade)" ] || (curl -sLS https://get.arkade.dev | sudo sh)'
     - for: {var: ARKADE_PACKAGES, split: ',', as: ARKADE_PACKAGE}
       cmd: 'arkade get {{ .ARKADE_PACKAGE }} && sudo cp -a ${HOME}/.arkade/bin/{{ .ARKADE_PACKAGE }} /usr/local/bin/'
-    status:
-    - command -v arkade
 
   krew:
     prompt: This will install Krew and dependent kubectl plugins... Do you wish to continue?
     platforms: [darwin, linux, windows]
+    deps: [arkade]
     desc: Install Krew dependencies and dependent packages. Kubectl plugins are useful for managing multiple k8s clusters.
     vars:
       KREW_FILE:
         sh: cat {{.KREW_FILE}} | xargs | sed 's/ /,/g'
-    preconditions:
-      - sh: 'command -v krew'
-        msg: 'krew is not installed or not in PATH. Please install krew and try again.'
     cmds:
+    - '[ -n "$(command -v krew)" ] || (arkade get krew)'
     - for: {var: KREW_FILE, split: ',', as: KREW_FILE}
-      cmd: 'export PATH="${KREW_ROOT:-$HOME/.krew}/bin:$PATH" && krew update && krew install {{ .KREW_FILE }}'
+      cmd: 'krew update && krew install {{ .KREW_FILE }}'
+    preconditions:
+    - {msg: "Missing Arkade", sh: "command -v arkade",}
 
   install-linux-packages:
     platforms: [linux]
@@ -119,7 +118,7 @@ tasks:
     cmds:
     - |
       {{if eq OS "linux"}}
-        task workstation:install-linux-packages --yes
+        task workstation:install-linux-packages USER_ROLE=devops-role --yes
         task workstation:install-docker --yes
         task workstation:install-nkp-cli --yes
         task workstation:load-dotfiles --yes

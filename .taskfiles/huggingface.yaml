@@ -1,5 +1,11 @@
 version: '3'
 
+env:
+  NFS_SERVER: ${NFS_SERVER_FQDN}
+  NFS_SHARE: '{{ default "llm-model-store" .NFS_SHARE}}'
+  MODEL_DIR: '{{ default "/mnt/{{.NFS_SERVER}}/{{.NFS_SHARE}}" .MODEL_DIR}}'
+  MODEL_NAME: '{{ default "meta-llama/Meta-Llama-3-8B" .MODEL_DIR}}'
+
 tasks:
 
   default:
@@ -13,6 +19,14 @@ tasks:
     requires:
       vars: [ENVIRONMENT]
 
+  install-hf-cli:
+    silent: false
+    desc: Install Huggingface CLI
+    cmds:
+    - pip install -q huggingface-cli
+    status:
+    - command -v huggingface-cli
+
   login:
     silent: false
     deps: [default]
@@ -25,31 +39,21 @@ tasks:
   mount-nfs-share:
     silent: false
     deps: [default]
-    #platforms: [linux]
+    platforms: [linux]
     desc: Mount NFS Share
-    vars:
-      NFS_SERVER: 'files.odin.cloudnative.nvdlab.net'
-      NFS_SHARE: 'llm-model-store'
-      #LOCAL_MOUNT_DIR: '/mnt/{{.NFS_SERVER}}/{{.NFS_SHARE}}'
-      LOCAL_MOUNT_DIR: '/private/{{.NFS_SERVER}}/{{.NFS_SHARE}}'
     cmds:
-    - test -d {{.LOCAL_MOUNT_DIR}} || sudo mkdir -p {{.LOCAL_MOUNT_DIR}}
-    - sudo mount -t nfs -w -v {{.NFS_SERVER}}:/{{.NFS_SHARE}} {{.LOCAL_MOUNT_DIR}}
+    - test -d {{.MODEL_DIR}} || sudo mkdir -p {{.MODEL_DIR}}
+    - sudo mount -t nfs -w -v {{.NFS_SERVER}}:/{{.NFS_SHARE}} {{.MODEL_DIR}}
     precondition:
     - sh: showmount -e {{.NFS_SERVER}} | awk '{print $1}' | grep -i llm-model-store
       msg: "NFS Share ({{.NFS_SHARE}}) not found on NFS Server ({{.NFS_SERVER}})"
-    # requires:
-    #   vars: [NFS_SERVER, NFS_SHARE, LOCAL_MOUNT_DIR]
+    requires:
+      vars: [NFS_SERVER, NFS_SHARE, MODEL_DIR]
 
   download-model:
     silent: false
     deps: [default]
     desc: Download Huggingface Model via CLI
-    vars:
-      #MODEL_NAME: 'meta-llama/Meta-Llama-3.1-70B-Instruct'
-      MODEL_DIR: '/private/files.odin.cloudnative.nvdlab.net/llm-model-store'
-      MODEL_NAME: 'meta-llama/Meta-Llama-3-8B'
-      MODEL_REVISION: 'main'
     cmds:
     - test -d {{.MODEL_DIR}} || sudo mkdir -p {{.MODEL_DIR}}/{{.MODEL_NAME}}
     - |

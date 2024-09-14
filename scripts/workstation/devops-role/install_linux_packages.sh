@@ -12,7 +12,6 @@ if grep -q -i ubuntu /etc/os-release; then
     vim \
     bash-completion \
     python3 \
-    python3-pip \
     shellcheck \
     fzf \
     tmux \
@@ -31,7 +30,6 @@ if grep -q -i rocky /etc/os-release; then
     vim \
     bash-completion \
     python3 \
-    python3-pip \
     tmux \
     zstd \
     httpd-tools \
