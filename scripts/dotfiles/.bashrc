@@ -39,10 +39,7 @@ alias vi="vim"
 alias reload="source ~/.bashrc"
 
 source <(devbox completion bash)
-source <(task --completion bash)
 source <(kubectl completion bash)
-source <(arkade completion bash)
-source <(eksctl completion bash)
 source <(kubectl completion bash)
 source <(stern --completion=bash)
 source <(helm completion bash)

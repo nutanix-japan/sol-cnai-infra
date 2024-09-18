@@ -54,6 +54,7 @@ bin/
 .todo
 .junk/
 .sandbox/
+genai-perf-results/
 
 # gitguardian cache
 .cache_ggshield

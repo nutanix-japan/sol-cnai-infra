@@ -145,3 +145,167 @@ for model in "${models[@]}"; do
    task huggingface:download-model MODEL_NAME=$model
 done
 ```
+
+## Performance Testing with NAI Endpoints using NVIDIA GenAI-Perf
+
+https://docs.nvidia.com/deeplearning/triton-inference-server/user-guide/docs/client/src/c%2B%2B/perf_analyzer/genai-perf/README.html
+
+```bash
+export RELEASE="24.06" # recommend using latest releases in yy.mm format
+
+## easier to run from docker then install via pip
+docker run --cpus 8 -it --net=host -v `pwd`:/workdir -w '/workdir' nvcr.io/nvidia/tritonserver:${RELEASE}-py3-sdk
+
+docker run --rm -it --net=host -v `pwd`:/workdir -w '/workdir' nvcr.io/nvidia/tritonserver:${RELEASE}-py3-sdk
+
+## set HF_TOKEN and Login
+export HF_HUB_TOKEN=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
+huggingface-cli login --token ${HF_HUB_TOKEN}
+
+## set NAI_OPENAI_API_KEY and NAI endpoint URL
+export NAI_OPENAI_API_KEY=1e4267ba-b12a-4b9d-90d6-d1cf1a26aeb2
+export URL=https://nai.cnai.nai-nkp-mgx.odin.cloudnative.nvdlab.net/api
+
+####### ONLY SET ONE OF THESE USE CASES
+## Defaults
+export SYSTEM_PROMPT_SEQUENCE_LENGTH=10
+
+## test use case 1 - chat q&a (small input/output - 30k requests)
+export INPUT_SEQUENCE_LENGTH=128
+export INPUT_SEQUENCE_STD=0
+export OUTPUT_SEQUENCE_LENGTH=128
+export OUTPUT_SEQUENCE_STD=0
+export NUMBER_OF_PROMPTS=30000
+export CONCURRENCY=100
+
+## test use case 2 - chat q&a (small input/medium output - 3k requests)
+export INPUT_SEQUENCE_LENGTH=128
+export INPUT_SEQUENCE_STD=0
+export OUTPUT_SEQUENCE_LENGTH=2048
+export OUTPUT_SEQUENCE_STD=0
+export NUMBER_OF_PROMPTS=3000
+export CONCURRENCY=10
+
+## test use case 3 - chat q&a (small input/large output - 1.5k requests)
+export INPUT_SEQUENCE_LENGTH=128
+export INPUT_SEQUENCE_STD=0
+export OUTPUT_SEQUENCE_LENGTH=4096
+export OUTPUT_SEQUENCE_STD=0
+export NUMBER_OF_PROMPTS=150
+export CONCURRENCY=10
+
+## test use case 4 - text summarization (classification - 3k requests)
+export INPUT_SEQUENCE_LENGTH=2048
+export INPUT_SEQUENCE_STD=0
+export OUTPUT_SEQUENCE_LENGTH=128
+export OUTPUT_SEQUENCE_STD=0
+export NUMBER_OF_PROMPTS=3000
+export CONCURRENCY=10
+
+## test use case 5 - chat co-pilot (large input/large output - 1.5k requests)
+export INPUT_SEQUENCE_LENGTH=2048
+export INPUT_SEQUENCE_STD=0
+export OUTPUT_SEQUENCE_LENGTH=2048
+export OUTPUT_SEQUENCE_STD=0
+export NUMBER_OF_PROMPTS=1500
+export CONCURRENCY=10
+
+####### ONLY SET ONE OF THESE MAX_TOKENS VALUES based on NAI ENDPOINT & Model Deployed
+## modify MAX_TOKENS based on GPU_COUNT and MODEL. Effectively trying to validate throughput based on dynamic batching provided by vLLM
+
+### 1x GPU (L40S) x1 Replica (VM)
+### Examples: meta-llama/Meta-Llama-3-8B-Instruct
+## MODEL value should match name in NAI endpoint
+export MODEL=llama-3-8b-instruct
+export GPU_MODEL=L40S
+export GPU_COUNT=1
+export REPLICA_COUNT=1
+export MAX_TOKENS=8192
+
+### 2x GPU (L40S) x1 Replica (VM)
+### Examples: meta-llama/CodeLlama-34b-Instruct-hf
+## MODEL value should match name in NAI endpoint
+export MODEL=codellama-34b-inst
+export GPU_MODEL=L40S
+export GPU_COUNT=2
+export REPLICA_COUNT=1
+export MAX_TOKENS=2048
+
+### 4x GPU (L40S) x1 Replica (VM)
+### Examples: meta-llama/Meta-Llama-3-70B-Instruct,meta-llama/CodeLlama-70b-Instruct-hf,mistralai/Mixtral-8x7B-Instruct-v0.1
+## MODEL value should match name in NAI endpoint
+export MODEL=llama-3-70b-instruct
+export GPU_MODEL=L40S
+export GPU_COUNT=4
+export REPLICA_COUNT=1
+export MAX_TOKENS=8192
+
+### 8x GPU (L40S) x2 Replica (VM) (SPANNING 2 PHYSICAL NODES)
+### Stretch use case for validating Load Balancing across 2 instances - NOT Pipeline Parallelization.
+### Examples meta-llama/Meta-Llama-3-70B-Instruct,meta-llama/CodeLlama-70b-Instruct-hf,mistralai/Mixtral-8x7B-Instruct-v0.1
+export MODEL=llama-3-70b-instruct
+export GPU_MODEL=L40S
+export GPU_COUNT=8
+export REPLICA_COUNT=2
+export MAX_TOKENS=16384
+
+###############
+## Calculate actual max tokens available after system and input prompt tokens are accounted for...
+
+export MAX_TOKENS=$((MAX_TOKENS - SYSTEM_PROMPT_SEQUENCE_LENGTH - INPUT_SEQUENCE_LENGTH))
+
+###############
+## Setup Profile Name used for Generated Benchmark Results
+export PROFILE_NAME="${MODEL}_${GPU_MODEL}x${GPU_COUNT}x${REPLICA_COUNT}_${MAX_TOKENS}_${INPUT_SEQUENCE_LENGTH}_${OUTPUT_SEQUENCE_LENGTH}_${NUMBER_OF_PROMPTS}_profile_export.json"
+
+### Example: This will ensure you can keep track of results based on Model and Test Config. i.e., llama-3-70b-instruct_L40Sx4x1_8054_128_128_1_profile_export.json
+
+echo $PROFILE_NAME
+
+## validate connectivity before test
+curl -v -k -X 'POST' ${URL}/v1/chat/completions \
+ -H "Authorization: Bearer ${NAI_OPENAI_API_KEY}" \
+ -H 'accept: application/json' \
+ -H 'Content-Type: application/json' \
+ -d "{
+      \"model\": \"$MODEL\",
+      \"messages\": [
+        {
+            \"role\": \"system\",
+            \"content\": \"You are a helpful assistant.\"
+        },
+        {
+          \"role\": \"user\",
+          \"content\": \"Explain Deep Neural Networks in simple terms\"
+        }
+      ],
+      \"max_tokens\": $MAX_TOKENS,
+      \"stream\": false
+}"
+
+## Run test
+genai-perf \
+    -m $MODEL \
+    --service-kind openai \
+    --endpoint v1/chat/completions \
+    --endpoint-type chat \
+    --streaming \
+    --backend vllm \
+    --profile-export-file $PROFILE_NAME \
+    --url $URL \
+    --synthetic-input-tokens-mean $INPUT_SEQUENCE_LENGTH \
+    --synthetic-input-tokens-stddev $INPUT_SEQUENCE_STD \
+    --concurrency $CONCURRENCY \
+    --num-prompts $NUMBER_OF_PROMPTS \
+    --random-seed 123 \
+    --output-tokens-mean $OUTPUT_SEQUENCE_LENGTH \
+    --output-tokens-stddev $OUTPUT_SEQUENCE_STD \
+    --artifact-dir genai-perf-results \
+    --tokenizer "hf-internal-testing/llama-tokenizer" \
+    --extra-inputs max_tokens:$MAX_TOKENS \
+    --generate-plots \
+    --measurement-interval 100000 \
+    -v \
+    -- \
+    -H "Authorization: Bearer $NAI_OPENAI_API_KEY"  
+```
