@@ -47,6 +47,16 @@ tasks:
       cmd: 'krew update && krew install {{ .KREW_FILE }}'
     preconditions:
     - {msg: "Missing Arkade", sh: "command -v arkade",}
+    
+  install-packages:
+    prompt: This will install all required packages locally... Are you certain you wish to continue?
+    platforms: [darwin, linux, windows]
+    desc: Install minimal workstation packages. For advanced local development/admin packages, run `task workstation:install-packages USER_ROLE=devops-role`
+    cmds:
+    - '{{if eq OS "darwin"}}task workstation:brew --yes{{end}}'
+    - '{{if eq OS "linux"}}task workstation:install-linux-packages --yes{{end}}'
+    - task workstation:arkade --yes
+    - task workstation:krew --yes
 
   install-linux-packages:
     platforms: [linux]
