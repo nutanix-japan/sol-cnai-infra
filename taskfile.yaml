@@ -47,12 +47,12 @@ tasks:
       To see list of tasks, run `task --list` or `task --list-all`
     cmds:
       - task --summary
-      - task: helpers:print-minimal-vars
-    preconditions:
-    - sh: '[ -f .env-{{.ENVIRONMENT}} ]'
-      msg: "Please create .env-{{.ENVIRONMENT}} file before running tasks. See README.md for more details."
-    requires:
-      vars: [ENVIRONMENT]
+    #   - task: helpers:print-minimal-vars
+    # preconditions:
+    # - sh: '[ -f .env-{{.ENVIRONMENT}} ]'
+    #   msg: "Please create .env-{{.ENVIRONMENT}} file before running tasks. See README.md for more details."
+    # requires:
+    #   vars: [ENVIRONMENT]
 
   deploy-nkai-kaos:
     desc: Deploy NKP and NAI End-to-End, No Coffee Breaks...Good Luck!
