@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
       - name: nai-chatapp
-        image: johnugeorge/nai-chatapp:0.8
+        image: johnugeorge/nai-chatapp:0.12
         ports:
         - containerPort: 8502
 ---
